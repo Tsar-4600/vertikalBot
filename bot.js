@@ -10,6 +10,7 @@ const CONFIG = {
   BOT_API: process.env.BOT_API,
   SALE_CHAT_ID: process.env.SALE_CHAT_ID,
   CHANNEL_ID: process.env.CHANNEL_ID,
+  ALLOWED_FILE_TYPES: ['application/json', 'text/plain'],
   MANAGERS: {
     'moscow': [
       {
@@ -29,7 +30,8 @@ const CONFIG = {
         chatId: process.env.GENERAL_MANAGER_CHAT_ID_1
       },
     ]
-  }
+  },
+
 };
 
 // Данные
@@ -316,7 +318,25 @@ const adminHandlers = {
       ['👥 Рассылка', '⬅️ Назад']
     ]).resize());
   },
+  uploadCatalog: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) {
+      return ctx.reply('❌ У вас нет прав доступа');
+    }
 
+    adminStates.set(ctx.from.id, { step: 'waiting_for_catalog_file' });
+    ctx.reply('📤 Отправьте JSON файл с товарами. Формат:\n\n' +
+      '{\n' +
+      '  "products": [\n' +
+      '    {\n' +
+      '      "sku": "артикул",\n' +
+      '      "name": "Название товара",\n' +
+      '      "price": 100000,\n' +
+      '      "urlSite": "https://...",\n' +
+      '      "urlSiteImage": "https://..."\n' +
+      '    }\n' +
+      '  ]\n' +
+      '}');
+  },
   startPostCreation: (ctx) => {
     if (!utils.isAdmin(ctx.from.id)) {
       return ctx.reply('❌ У вас нет прав доступа');
@@ -460,27 +480,27 @@ const adminHandlers = {
       }
     }
   },
-   deletePost: async (ctx, postId) => {
+  deletePost: async (ctx, postId) => {
     console.log(`[DELETE] Start deletePost for ID: ${postId} by user ${ctx.from.id}`);
-    
+
     // Проверка прав администратора
     if (!utils.isAdmin(ctx.from.id)) {
       console.log('[DELETE] User is not admin, access denied.');
       return ctx.reply('❌ У вас нет прав доступа');
     }
-    
+
     try {
       console.log('[DELETE] Attempting to delete post:', postId);
-      
+
       // Вызываем сервис удаления из postService
       await postService.deletePost(postId);
-      
+
       console.log('[DELETE] Post deleted successfully from database');
       await ctx.reply('✅ Пост успешно удален из базы данных!');
-      
+
     } catch (error) {
       console.error('[DELETE] ERROR:', error);
-      
+
       // Обрабатываем конкретную ошибку из postService.deletePost
       if (error.message === 'Пост не найден') {
         await ctx.reply('❌ Пост не найден в базе данных');
@@ -786,6 +806,7 @@ function setupBotHandlers() {
     const postId = parseInt(ctx.match[1]);
     adminHandlers.deletePost(ctx, postId);
   });
+   bot.command('upload_catalog', adminHandlers.uploadCatalog);
   // Текстовые обработчики
   bot.hears('📦 Показать каталог', userHandlers.showCatalog);
   bot.hears('🌐 Наш сайт', userHandlers.showWebsite);
@@ -814,6 +835,56 @@ function setupBotHandlers() {
   bot.action(/^region_(.+)$/, (ctx) => applicationHandlers.handleRegionSelection(ctx));
   bot.action(/^publish_(\d+)$/, (ctx) => adminHandlers.handleInlinePublish(ctx));
   bot.action(/^delete_(\d+)$/, (ctx) => adminHandlers.handleInlineDelete(ctx));
+
+  // Обработчик документов (обновленная версия)
+  bot.on('document', async (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'waiting_for_catalog_file') {
+      const document = ctx.message.document;
+
+      // Проверка типа файла
+      if (!CONFIG.ALLOWED_FILE_TYPES.includes(document.mime_type)) {
+        return ctx.reply('❌ Неверный формат файла. Отправьте JSON файл.');
+      }
+
+      try {
+        // Получаем файл
+        const fileLink = await ctx.telegram.getFileLink(document.file_id);
+        const response = await fetch(fileLink);
+        const jsonData = await response.json();
+
+        // Валидация данных
+        if (!jsonData.products || !Array.isArray(jsonData.products)) {
+          return ctx.reply('❌ Неверный формат JSON. Ожидается массив products');
+        }
+
+        // Проверяем обязательные поля
+        for (const product of jsonData.products) {
+          if (!product.sku || !product.name || !product.price || !product.urlSite || !product.urlSiteImage) {
+            return ctx.reply('❌ В JSON отсутствуют обязательные поля (sku, name, price, urlSite, urlSiteImage)');
+          }
+        }
+
+        // Сохраняем в JS файл с правильным форматом
+        const catalogPath = path.join(__dirname, 'catalogProducts.js');
+        const jsContent = `const catalogProductsData = ${JSON.stringify(jsonData, null, 2)};\n\nmodule.exports = catalogProductsData;`;
+
+        await fs.writeFile(catalogPath, jsContent);
+
+        // Обновляем кэш
+        catalogProductsData.products = jsonData.products;
+
+        adminStates.delete(ctx.from.id);
+        ctx.reply(`✅ Каталог обновлен! Добавлено товаров: ${jsonData.products.length}`);
+
+      } catch (error) {
+        console.error('Ошибка загрузки каталога:', error);
+        ctx.reply('❌ Ошибка при обработке файла: ' + error.message);
+      }
+    }
+  });
 
   // Обработка медиа и текста для админов
 
