@@ -77,6 +77,252 @@ const utils = {
   isAdmin: (userId) => CONFIG.ADMIN_IDS.includes(userId.toString())
 };
 
+
+// Обработчики админ-панели товаров
+const productAdminHandlers = {
+  showProductAdminPanel: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) {
+      return ctx.reply('❌ У вас нет прав доступа');
+    }
+
+    ctx.reply('🛒 Управление товарами:', Markup.keyboard([
+      ['📦 Добавить товар', '📝 Редактировать товар'],
+      ['🗑️ Удалить товар', '📊 Список товаров'],
+      ['⬅️ Назад в админку']
+    ]).resize());
+  },
+
+  startProductCreation: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    adminStates.set(ctx.from.id, {
+      step: 'product_waiting_name',
+      productData: {}
+    });
+
+    ctx.reply('Введите название товара:');
+  },
+
+  handleProductName: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_waiting_name') {
+      state.productData.name = ctx.message.text;
+      state.step = 'product_waiting_sku';
+      adminStates.set(ctx.from.id, state);
+
+      ctx.reply('Введите артикул (SKU):');
+    }
+  },
+
+  handleProductSku: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_waiting_sku') {
+      state.productData.sku = ctx.message.text;
+      state.step = 'product_waiting_price';
+      adminStates.set(ctx.from.id, state);
+
+      ctx.reply('Введите цену (только число):');
+    }
+  },
+
+  handleProductPrice: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_waiting_price') {
+      const price = parseFloat(ctx.message.text);
+      if (isNaN(price)) {
+        return ctx.reply('❌ Введите корректную цену (число):');
+      }
+
+      state.productData.price = price;
+      state.step = 'product_waiting_urlSite';
+      adminStates.set(ctx.from.id, state);
+
+      ctx.reply('Введите URL страницы товара на сайте:');
+    }
+  },
+
+  handleProductUrlSite: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_waiting_urlSite') {
+      state.productData.urlSite = ctx.message.text;
+      state.step = 'product_waiting_urlSiteImage';
+      adminStates.set(ctx.from.id, state);
+
+      ctx.reply('Отправьте фото товара:');
+    }
+  },
+
+  handleProductPhoto: async (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_waiting_urlSiteImage') {
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+      state.productData.urlSiteImage = photo.file_id;
+
+      try {
+        const newProduct = await productService.createProduct(state.productData);
+        adminStates.delete(ctx.from.id);
+
+        ctx.replyWithPhoto(photo.file_id, {
+          caption: `✅ Товар создан!\n\nНазвание: ${newProduct.name}\nАртикул: ${newProduct.sku}\nЦена: ${newProduct.price} руб.\n\nID: ${newProduct.id}`
+        });
+      } catch (error) {
+        console.error('Ошибка создания товара:', error);
+        ctx.reply('❌ Ошибка при создании товара');
+      }
+    }
+  },
+
+  showProductList: (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const products = productService.getAllProducts();
+
+    if (products.length === 0) {
+      return ctx.reply('📦 Каталог товаров пуст');
+    }
+
+    let message = `📊 Список товаров (${products.length}):\n\n`;
+
+    products.forEach((product, index) => {
+      message += `${index + 1}. ${product.name} (${product.sku})\n`;
+      message += `   💰 ${product.price} руб.\n`;
+      message += `   🆔 ID: ${product.id}\n\n`;
+    });
+
+    message += 'Для редактирования используйте /edit_product_[ID]\n';
+    message += 'Для удаления используйте /delete_product_[ID]';
+
+    ctx.reply(message);
+  },
+
+  startProductEdit: (ctx, productId) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const product = productService.findProductById(productId);
+    if (!product) {
+      return ctx.reply('❌ Товар не найден');
+    }
+
+    adminStates.set(ctx.from.id, {
+      step: 'product_edit_choice',
+      productId: productId,
+      product: product
+    });
+
+    ctx.reply(`Редактирование товара: ${product.name}`, Markup.inlineKeyboard([
+      [Markup.button.callback('✏️ Название', `edit_product_name_${productId}`)],
+      [Markup.button.callback('📦 Артикул', `edit_product_sku_${productId}`)],
+      [Markup.button.callback('💰 Цена', `edit_product_price_${productId}`)],
+      [Markup.button.callback('🌐 Ссылка', `edit_product_url_${productId}`)],
+      [Markup.button.callback('🖼️ Фото', `edit_product_photo_${productId}`)]
+    ]));
+  },
+
+  handleProductEditChoice: async (ctx, field, productId) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const product = productService.findProductById(productId);
+    if (!product) {
+      return ctx.answerCbQuery('❌ Товар не найден');
+    }
+
+    adminStates.set(ctx.from.id, {
+      step: `product_edit_${field}`,
+      productId: productId,
+      field: field
+    });
+
+    const fieldNames = {
+      'name': 'название',
+      'sku': 'артикул',
+      'price': 'цену',
+      'url': 'ссылку на сайт'
+    };
+
+    await ctx.reply(`Введите новое ${fieldNames[field]} для товара "${product.name}":`);
+    await ctx.answerCbQuery();
+  },
+
+  handleProductEditField: async (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (!state || !state.step.startsWith('product_edit_')) return;
+
+    const field = state.field;
+    let value = ctx.message.text;
+
+    try {
+      if (field === 'price') {
+        value = parseFloat(value);
+        if (isNaN(value)) {
+          return ctx.reply('❌ Введите корректную цену (число):');
+        }
+      }
+
+      await productService.updateProduct(state.productId, { [field]: value });
+      adminStates.delete(ctx.from.id);
+
+      ctx.reply(`✅ ${field === 'name' ? 'Название' : 'Поле'} успешно обновлено!`);
+    } catch (error) {
+      console.error('Ошибка обновления товара:', error);
+      ctx.reply('❌ Ошибка при обновлении товара');
+    }
+  },
+
+  handleProductEditPhoto: async (ctx) => {
+    if (!utils.isAdmin(ctx.from.id)) return;
+
+    const state = adminStates.get(ctx.from.id);
+    if (state && state.step === 'product_edit_photo') {
+      const photo = ctx.message.photo[ctx.message.photo.length - 1];
+
+      try {
+        await productService.updateProduct(state.productId, {
+          urlSiteImage: photo.file_id
+        });
+        adminStates.delete(ctx.from.id);
+
+        ctx.replyWithPhoto(photo.file_id, {
+          caption: '✅ Фото товара обновлено!'
+        });
+      } catch (error) {
+        console.error('Ошибка обновления фото:', error);
+        ctx.reply('❌ Ошибка при обновлении фото');
+      }
+    }
+  },
+
+  deleteProduct: async (ctx, productId) => {
+    if (!utils.isAdmin(ctx.from.id)) {
+      return ctx.reply('❌ У вас нет прав доступа');
+    }
+
+    try {
+      const product = productService.findProductById(productId);
+      if (!product) {
+        return ctx.reply('❌ Товар не найден');
+      }
+
+      await productService.deleteProduct(productId);
+      ctx.reply(`✅ Товар "${product.name}" успешно удален!`);
+    } catch (error) {
+      console.error('Ошибка удаления товара:', error);
+      ctx.reply('❌ Ошибка при удалении товара');
+    }
+  }
+};
+
 // Сервис работы с постами
 const postService = {
   async savePosts() {
@@ -313,7 +559,8 @@ const adminHandlers = {
 
     ctx.reply('🛠️ Панель администратора:', Markup.keyboard([
       ['📝 Создать пост', '📊 Статистика постов'],
-      ['👥 Рассылка', '⬅️ Назад']
+      ['🛒 Управление товарами', '👥 Рассылка'],
+      ['⬅️ Назад']
     ]).resize());
   },
 
@@ -460,27 +707,27 @@ const adminHandlers = {
       }
     }
   },
-   deletePost: async (ctx, postId) => {
+  deletePost: async (ctx, postId) => {
     console.log(`[DELETE] Start deletePost for ID: ${postId} by user ${ctx.from.id}`);
-    
+
     // Проверка прав администратора
     if (!utils.isAdmin(ctx.from.id)) {
       console.log('[DELETE] User is not admin, access denied.');
       return ctx.reply('❌ У вас нет прав доступа');
     }
-    
+
     try {
       console.log('[DELETE] Attempting to delete post:', postId);
-      
+
       // Вызываем сервис удаления из postService
       await postService.deletePost(postId);
-      
+
       console.log('[DELETE] Post deleted successfully from database');
       await ctx.reply('✅ Пост успешно удален из базы данных!');
-      
+
     } catch (error) {
       console.error('[DELETE] ERROR:', error);
-      
+
       // Обрабатываем конкретную ошибку из postService.deletePost
       if (error.message === 'Пост не найден') {
         await ctx.reply('❌ Пост не найден в базе данных');
@@ -786,6 +1033,19 @@ function setupBotHandlers() {
     const postId = parseInt(ctx.match[1]);
     adminHandlers.deletePost(ctx, postId);
   });
+
+
+  // Команды управления товарами
+  bot.command('products', (ctx) => productAdminHandlers.showProductAdminPanel(ctx));
+  bot.command(/^edit_product_(\d+)$/, (ctx) => {
+    const productId = parseInt(ctx.match[1]);
+    productAdminHandlers.startProductEdit(ctx, productId);
+  });
+  bot.command(/^delete_product_(\d+)$/, (ctx) => {
+    const productId = parseInt(ctx.match[1]);
+    productAdminHandlers.deleteProduct(ctx, productId);
+  });
+
   // Текстовые обработчики
   bot.hears('📦 Показать каталог', userHandlers.showCatalog);
   bot.hears('🌐 Наш сайт', userHandlers.showWebsite);
@@ -797,6 +1057,33 @@ function setupBotHandlers() {
   bot.hears('📝 Создать пост', adminHandlers.startPostCreation);
   bot.hears('📊 Статистика постов', adminHandlers.showPostStats);
   bot.hears('👥 Рассылка', adminHandlers.startBroadcast);
+  // В setupBotHandlers добавьте:
+  bot.hears('🛒 Управление товарами', (ctx) => productAdminHandlers.showProductAdminPanel(ctx));
+  
+  // Обработчики для создания товаров
+  bot.hears('📦 Добавить товар', (ctx) => productAdminHandlers.startProductCreation(ctx));
+  bot.hears('📝 Редактировать товар', (ctx) => ctx.reply('Используйте /edit_product_[ID]'));
+  bot.hears('🗑️ Удалить товар', (ctx) => ctx.reply('Используйте /delete_product_[ID]'));
+  bot.hears('📊 Список товаров', (ctx) => productAdminHandlers.showProductList(ctx));
+  bot.hears('⬅️ Назад в админку', (ctx) => adminHandlers.showAdminPanel(ctx));
+
+  // Inline кнопки для редактирования
+  bot.action(/^edit_product_(name|sku|price|url)_(\d+)$/, (ctx) => {
+    const field = ctx.match[1];
+    const productId = parseInt(ctx.match[2]);
+    productAdminHandlers.handleProductEditChoice(ctx, field, productId);
+  });
+  bot.action(/^edit_product_photo_(\d+)$/, (ctx) => {
+    const productId = parseInt(ctx.match[1]);
+    const state = adminStates.get(ctx.from.id);
+    if (state) {
+      state.step = 'product_edit_photo';
+      state.productId = productId;
+      adminStates.set(ctx.from.id, state);
+    }
+    ctx.reply('Отправьте новое фото для товара:');
+    ctx.answerCbQuery();
+  });
 
   // Inline кнопки
   bot.action(/^set_region_(.+)$/, (ctx) => userHandlers.handleSetRegion(ctx));
@@ -821,7 +1108,14 @@ function setupBotHandlers() {
   bot.on('text', (ctx) => adminHandlers.handleBroadcast(ctx));
   bot.on('photo', (ctx) => adminHandlers.handlePhotoUpload(ctx));
 
-
+  // Обработчики состояний для товаров
+  bot.on('text', (ctx) => productAdminHandlers.handleProductName(ctx));
+  bot.on('text', (ctx) => productAdminHandlers.handleProductSku(ctx));
+  bot.on('text', (ctx) => productAdminHandlers.handleProductPrice(ctx));
+  bot.on('text', (ctx) => productAdminHandlers.handleProductUrlSite(ctx));
+  bot.on('text', (ctx) => productAdminHandlers.handleProductEditField(ctx));
+  bot.on('photo', (ctx) => productAdminHandlers.handleProductPhoto(ctx));
+  bot.on('photo', (ctx) => productAdminHandlers.handleProductEditPhoto(ctx));
   // Fallback
   bot.on('text', (ctx) => {
     ctx.reply('Не понимаю команду. Используйте /catalog для просмотра товаров или /help для помощи');
