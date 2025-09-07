@@ -1,0 +1,89 @@
+{
+  "posts": [
+    {
+      "id": 1757192372741,
+      "text": "Hello",
+      "photo": "AgACAgIAAxkBAAP4aLygtj_UX4_yx1QsH7N0uCPIaVUAAvIBMhs0VuBJOZtElkjat9sBAAMCAAN4AAM2BA",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T20:59:32.741Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757193258232,
+      "text": "Тестовый",
+      "photo": "AgACAgIAAxkBAAIBB2i8pCtyGhwEXHDiSf7dWV96h_qxAAL7ATIbNFbgSQ-uekjVN4F4AQADAgADeAADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T21:14:18.232Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757194275980,
+      "text": "hello",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T21:31:15.980Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757195422791,
+      "text": "frist post",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T21:50:22.791Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757196616045,
+      "text": "HEllo",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T22:10:16.045Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757197935136,
+      "text": "Hello",
+      "photo": "AgACAgIAAxkBAAIBPWi8tnDWM1wgdXfmoXjVp4bci_BDAAII-jEbNFboSTr6IzMT2keDAQADAgADbQADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-06T22:32:15.136Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757233079665,
+      "text": "test post",
+      "photo": "AgACAgIAAxkBAAIBRGi9P7mFg-pyHuFJG76j_VvfPignAAJg_DEbNFboSZReVkWei_WrAQADAgADbQADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-07T08:17:59.665Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757233231697,
+      "text": "PLZ sends",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-07T08:20:31.697Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757233410055,
+      "text": "hello",
+      "photo": "AgACAgIAAxkBAAIBWGi9QQRYw6SugWo1XagM3oGcChrGAAJ2_DEbNFboSQyVN4id3n0wAQADAgADbQADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-07T08:23:30.055Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757233645465,
+      "text": "HELLO)",
+      "photo": "AgACAgIAAxkBAAIBX2i9Qe8rxUDbNHWdaIEIPIHDpSExAAJ5_DEbNFboSfT6w6wD36PJAQADAgADbQADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-07T08:27:25.465Z",
+      "status": "draft"
+    },
+    {
+      "id": 1757235094561,
+      "text": "helllohelo",
+      "photo": "AgACAgIAAxkBAAIBdGi9R5jJb3MF0gnh7ia53facJyR8AAKU_DEbNFboSSXv4zFGwthlAQADAgADbQADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-07T08:51:34.561Z",
+      "status": "published",
+      "publishedAt": "2025-09-07T08:55:58.922Z"
+    }
+  ]
+}
