@@ -119,7 +119,6 @@ const postService = {
     await this.savePosts();
     return post;
   },
-
   async deletePost(postId) {
     const index = adminPosts.posts.findIndex(p => p.id === postId);
     if (index === -1) throw new Error('Пост не найден');
@@ -461,6 +460,35 @@ const adminHandlers = {
       }
     }
   },
+   deletePost: async (ctx, postId) => {
+    console.log(`[DELETE] Start deletePost for ID: ${postId} by user ${ctx.from.id}`);
+    
+    // Проверка прав администратора
+    if (!utils.isAdmin(ctx.from.id)) {
+      console.log('[DELETE] User is not admin, access denied.');
+      return ctx.reply('❌ У вас нет прав доступа');
+    }
+    
+    try {
+      console.log('[DELETE] Attempting to delete post:', postId);
+      
+      // Вызываем сервис удаления из postService
+      await postService.deletePost(postId);
+      
+      console.log('[DELETE] Post deleted successfully from database');
+      await ctx.reply('✅ Пост успешно удален из базы данных!');
+      
+    } catch (error) {
+      console.error('[DELETE] ERROR:', error);
+      
+      // Обрабатываем конкретную ошибку из postService.deletePost
+      if (error.message === 'Пост не найден') {
+        await ctx.reply('❌ Пост не найден в базе данных');
+      } else {
+        await ctx.reply('❌ Ошибка при удалении поста: ' + error.message);
+      }
+    }
+  },
 
   showPostStats: (ctx) => {
     if (!utils.isAdmin(ctx.from.id)) {
@@ -723,6 +751,7 @@ function setupBotHandlers() {
   // Основные команды
   bot.start(userHandlers.start);
   bot.command('catalog', userHandlers.showCatalog);
+  bot.command('admin', adminHandlers.showAdminPanel);
   bot.command('region', userHandlers.showRegionSelection);
   bot.command('info', userHandlers.showInfo);
   bot.command('links', userHandlers.showLinks);
@@ -752,24 +781,22 @@ function setupBotHandlers() {
     adminHandlers.publishPost(ctx, postId);
   });
   bot.command(/^view_post_(\d+)$/, (ctx) => adminHandlers.viewPost(ctx, parseInt(ctx.match[1])));
-
+  bot.command(/^delete_post_(\d+)$/, (ctx) => {
+    console.log('🟢 ОБРАБОТЧИК КОМАНДЫ delete_post_ ЗАПУЩЕН! ID:', ctx.match[1]);
+    const postId = parseInt(ctx.match[1]);
+    adminHandlers.deletePost(ctx, postId);
+  });
   // Текстовые обработчики
   bot.hears('📦 Показать каталог', userHandlers.showCatalog);
   bot.hears('🌐 Наш сайт', userHandlers.showWebsite);
   bot.hears('📞 Контакты', userHandlers.showContacts);
   bot.hears('📍 Сменить регион', userHandlers.showRegionSelection);
 
-  // Админ команды
-  bot.command('admin', adminHandlers.showAdminPanel);
+
+
   bot.hears('📝 Создать пост', adminHandlers.startPostCreation);
   bot.hears('📊 Статистика постов', adminHandlers.showPostStats);
   bot.hears('👥 Рассылка', adminHandlers.startBroadcast);
-
-  // Обработка медиа и текста для админов
-
-  bot.on('text', (ctx) => adminHandlers.handlePostText(ctx));
-  bot.on('text', (ctx) => adminHandlers.handleBroadcast(ctx));
-  bot.on('photo', (ctx) => adminHandlers.handlePhotoUpload(ctx));
 
   // Inline кнопки
   bot.action(/^set_region_(.+)$/, (ctx) => userHandlers.handleSetRegion(ctx));
@@ -787,6 +814,13 @@ function setupBotHandlers() {
   bot.action(/^region_(.+)$/, (ctx) => applicationHandlers.handleRegionSelection(ctx));
   bot.action(/^publish_(\d+)$/, (ctx) => adminHandlers.handleInlinePublish(ctx));
   bot.action(/^delete_(\d+)$/, (ctx) => adminHandlers.handleInlineDelete(ctx));
+
+  // Обработка медиа и текста для админов
+
+  bot.on('text', (ctx) => adminHandlers.handlePostText(ctx));
+  bot.on('text', (ctx) => adminHandlers.handleBroadcast(ctx));
+  bot.on('photo', (ctx) => adminHandlers.handlePhotoUpload(ctx));
+
 
   // Fallback
   bot.on('text', (ctx) => {
