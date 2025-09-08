@@ -60,13 +60,44 @@ const adminStates = new Map();
 
 // Утилиты
 const utils = {
-  escapeMarkdown: (text) => text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1'),
+    escapeHtml: (text) => {
+    if (!text) return '';
+    return text.toString()
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  },
+
+  escapeMarkdown: (text) => {
+    if (!text) return '';
+    return text.toString()
+      .replace(/\_/g, '\\_')
+      .replace(/\*/g, '\\*')
+      .replace(/\[/g, '\\[')
+      .replace(/\]/g, '\\]')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)')
+      .replace(/\~/g, '\\~')
+      .replace(/\`/g, '\\`')
+      .replace(/\>/g, '\\>')
+      .replace(/\#/g, '\\#')
+      .replace(/\+/g, '\\+')
+      .replace(/\-/g, '\\-')  // ← Экранирование дефиса
+      .replace(/\=/g, '\\=')
+      .replace(/\|/g, '\\|')
+      .replace(/\{/g, '\\{')
+      .replace(/\}/g, '\\}')
+      .replace(/\./g, '\\.')
+      .replace(/\!/g, '\\!');
+  },
 
   getRegionName: (regionCode) => {
     const regions = {
-      'moscow': 'Москва 🏢',
-      'petersburg': 'Санкт-Петербург 🏛️',
-      'other': 'Другой регион 🌍'
+      'moscow': 'Москва',
+      'petersburg': 'Санкт-Петербург',
+      'other': 'Другой регион'
     };
     return regions[regionCode] || 'Неизвестный регион';
   },
@@ -78,6 +109,139 @@ const utils = {
 
   isAdmin: (userId) => CONFIG.ADMIN_IDS.includes(userId.toString())
 };
+
+// Добавляем middleware для обработки состояний
+bot.use(async (ctx, next) => {
+  const userId = ctx.from.id;
+  const state = adminStates.get(userId);
+
+  // Если пользователь в состоянии ожидания файла каталога и это документ
+  if (state && state.step === 'waiting_for_catalog_file' && ctx.message && ctx.message.document) {
+    await handleCatalogUpload(ctx);
+    return; // Прерываем цепочку middleware
+  }
+
+  // Если пользователь в состоянии ожидания текста поста и это текст
+  if (state && state.step === 'waiting_for_text' && ctx.message && ctx.message.text) {
+    await handlePostText(ctx);
+    return;
+  }
+
+  // Если пользователь в состоянии ожидания фото поста
+  if (state && state.step === 'waiting_for_photo') {
+    if (ctx.message && ctx.message.photo) {
+      await handlePhotoUpload(ctx);
+      return;
+    } else if (ctx.message && ctx.message.text && ctx.message.text.toLowerCase() === 'нет') {
+      await createTextPost(ctx, state.text);
+      return;
+    }
+  }
+
+  // Если пользователь в состоянии ожидания рассылки и это текст
+  if (state && state.step === 'waiting_for_broadcast' && ctx.message && ctx.message.text) {
+    await handleBroadcast(ctx);
+    return;
+  }
+
+  // Продолжаем обработку другими обработчиками
+  await next();
+});
+
+// Выносим обработчики в отдельные функции
+async function handleCatalogUpload(ctx) {
+  if (!utils.isAdmin(ctx.from.id)) return;
+
+  const document = ctx.message.document;
+
+  // Проверка типа файла
+  if (!CONFIG.ALLOWED_FILE_TYPES.includes(document.mime_type)) {
+    return ctx.reply('❌ Неверный формат файла. Отправьте JSON файл.');
+  }
+
+  try {
+    // Получаем файл
+    const fileLink = await ctx.telegram.getFileLink(document.file_id);
+    const response = await fetch(fileLink);
+    const jsonData = await response.json();
+
+    // Валидация данных
+    if (!jsonData.products || !Array.isArray(jsonData.products)) {
+      return ctx.reply('❌ Неверный формат JSON. Ожидается массив products');
+    }
+
+    // Проверяем обязательные поля
+    for (const product of jsonData.products) {
+      if (!product.sku || !product.name || !product.price || !product.urlSite || !product.urlSiteImage) {
+        return ctx.reply('❌ В JSON отсутствуют обязательные поля (sku, name, price, urlSite, urlSiteImage)');
+      }
+    }
+
+    // Сохраняем в JS файл с правильным форматом
+    const catalogPath = path.join(__dirname, 'catalogProducts.js');
+    const jsContent = `const catalogProductsData = ${JSON.stringify(jsonData, null, 2)};\n\nmodule.exports = catalogProductsData;`;
+
+    await fs.writeFile(catalogPath, jsContent);
+
+    // Обновляем кэш
+    catalogProductsData.products = jsonData.products;
+
+    adminStates.delete(ctx.from.id);
+    ctx.reply(`✅ Каталог обновлен! Добавлено товаров: ${jsonData.products.length}`);
+
+  } catch (error) {
+    console.error('Ошибка загрузки каталога:', error);
+    ctx.reply('❌ Ошибка при обработке файла: ' + error.message);
+  }
+}
+
+async function handlePostText(ctx) {
+  if (!utils.isAdmin(ctx.from.id)) return;
+
+  adminStates.set(ctx.from.id, {
+    step: 'waiting_for_photo',
+    text: ctx.message.text
+  });
+
+  ctx.reply('✅ Текст сохранен. Теперь отправьте фото для поста (или отправьте "нет" если без фото):');
+}
+
+async function handlePhotoUpload(ctx) {
+  if (!utils.isAdmin(ctx.from.id)) return;
+
+  const state = adminStates.get(ctx.from.id);
+
+  if (state && state.step === 'waiting_for_photo') {
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const fileId = photo.file_id;
+
+    try {
+      const newPost = await postService.createPost({
+        text: state.text,
+        photo: fileId,
+        createdBy: ctx.from.username || ctx.from.first_name
+      });
+
+      adminStates.delete(ctx.from.id);
+
+      ctx.replyWithPhoto(fileId, {
+        caption: `✅ Пост создан! Статус: черновик\n\nID: ${newPost.id}\n\nИспользуйте команду /publish_${newPost.id} для публикации`
+      });
+    } catch (error) {
+      console.error('Ошибка создания поста с фото:', error);
+      ctx.reply('❌ Ошибка при создании поста');
+    }
+  }
+}
+
+async function handleBroadcast(ctx) {
+  if (!utils.isAdmin(ctx.from.id)) return;
+
+  ctx.reply('⏳ Начинаю рассылку... Это может занять время');
+  // Логика рассылки будет здесь
+  adminStates.delete(ctx.from.id);
+  ctx.reply('✅ Рассылка завершена');
+}
 
 // Сервис работы с постами
 const postService = {
@@ -159,10 +323,8 @@ const productService = {
     userStates.set(ctx.from.id, index);
 
     const escapedName = utils.escapeMarkdown(product.name);
-    const escapedSku = utils.escapeMarkdown(product.sku);
 
     const caption = `🏗️ *${escapedName}*\n\n` +
-      `📦 Артикул: ${escapedSku}\n` +
       `💰 Цена: ${product.price.toLocaleString('ru-RU')} руб.\n\n` +
       `ℹ️ Подробное описание на нашем сайте`;
 
@@ -243,20 +405,6 @@ const userHandlers = {
     ctx.reply('📞 Для связи:\nТелефон: +7 (XXX) XXX-XX-XX\nEmail: info@gkvertikal.ru');
   },
 
-  showRegionSelection: (ctx) => {
-    ctx.reply(
-      '📍 Выберите ваш регион:',
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback('🏢 Москва', 'set_region_moscow'),
-          Markup.button.callback('🏛️ Санкт-Петербург', 'set_region_petersburg')
-        ],
-        [
-          Markup.button.callback('🌍 Другой регион', 'set_region_other')
-        ]
-      ])
-    );
-  },
 
   showInfo: (ctx) => {
     const productCount = catalogProductsData.products.length;
@@ -315,7 +463,8 @@ const adminHandlers = {
 
     ctx.reply('🛠️ Панель администратора:', Markup.keyboard([
       ['📝 Создать пост', '📊 Статистика постов'],
-      ['👥 Рассылка', '⬅️ Назад']
+      ['👥 Рассылка', '📤 Загрузить каталог'],
+      ['⬅️ Назад']
     ]).resize());
   },
   uploadCatalog: (ctx) => {
@@ -708,28 +857,27 @@ const applicationHandlers = {
       const firstName = user.first_name || 'не указано';
 
       const messageText = `
-🎯 *НОВАЯ ЗАЯВКА НА ТОВАР* 
+<b>🎯 НОВАЯ ЗАЯВКА НА ТОВАР</b> 
 ${managerMentions}
 
-*📍 Регион:* ${utils.getRegionName(region)}
+<b>📍 Регион:</b> ${utils.escapeHtml(utils.getRegionName(region))}
 
-*📦 Информация о товаре:*
-• Наименование: ${utils.escapeMarkdown(product.name)}
-• Артикул: ${utils.escapeMarkdown(product.sku)}
+<b>📦 Информация о товаре:</b>
+• Наименование: ${utils.escapeHtml(product.name)}
 • Цена: ${product.price.toLocaleString('ru-RU')} руб.
 • Ссылка на сайте: ${product.urlSite}
 
-*👤 Информация о клиенте:*
-• Имя: ${utils.escapeMarkdown(firstName)}
+<b>👤 Информация о клиенте:</b>
+• Имя: ${utils.escapeHtml(firstName)}
 • Username: ${username}
 • User ID: ${user.id}
 
-*🔗 Ссылки для связи:*
+<b>🔗 Ссылки для связи:</b>
 ${username !== 'не указан' ? `• Написать в Telegram: https://t.me/${user.username}` : '• Telegram: недоступен'}
 • Ссылка на товар: ${product.urlSite}
 
-*⏰ Время заявки:* ${new Date().toLocaleString('ru-RU')}
-      `.trim();
+<b>⏰ Время заявки:</b> ${new Date().toLocaleString('ru-RU')}
+`.trim();
 
       const replyMarkup = {
         inline_keyboard: [
@@ -750,7 +898,7 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         CONFIG.SALE_CHAT_ID,
         messageText,
         {
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML', // ← Используйте HTML
           reply_markup: replyMarkup
         }
       );
@@ -772,7 +920,6 @@ function setupBotHandlers() {
   bot.start(userHandlers.start);
   bot.command('catalog', userHandlers.showCatalog);
   bot.command('admin', adminHandlers.showAdminPanel);
-  bot.command('region', userHandlers.showRegionSelection);
   bot.command('info', userHandlers.showInfo);
   bot.command('links', userHandlers.showLinks);
   bot.command('id', userHandlers.showId);
@@ -806,21 +953,20 @@ function setupBotHandlers() {
     const postId = parseInt(ctx.match[1]);
     adminHandlers.deletePost(ctx, postId);
   });
-   bot.command('upload_catalog', adminHandlers.uploadCatalog);
+  bot.command('upload_catalog', adminHandlers.uploadCatalog);
   // Текстовые обработчики
   bot.hears('📦 Показать каталог', userHandlers.showCatalog);
   bot.hears('🌐 Наш сайт', userHandlers.showWebsite);
   bot.hears('📞 Контакты', userHandlers.showContacts);
-  bot.hears('📍 Сменить регион', userHandlers.showRegionSelection);
 
 
 
   bot.hears('📝 Создать пост', adminHandlers.startPostCreation);
   bot.hears('📊 Статистика постов', adminHandlers.showPostStats);
   bot.hears('👥 Рассылка', adminHandlers.startBroadcast);
+  bot.hears('📤 Загрузить каталог', adminHandlers.uploadCatalog);
 
   // Inline кнопки
-  bot.action(/^set_region_(.+)$/, (ctx) => userHandlers.handleSetRegion(ctx));
   bot.action(/^prev_(\d+)$/, (ctx) => {
     const currentIndex = parseInt(ctx.match[1]);
     productService.showProduct(ctx, currentIndex - 1);
@@ -836,61 +982,9 @@ function setupBotHandlers() {
   bot.action(/^publish_(\d+)$/, (ctx) => adminHandlers.handleInlinePublish(ctx));
   bot.action(/^delete_(\d+)$/, (ctx) => adminHandlers.handleInlineDelete(ctx));
 
-  // Обработчик документов (обновленная версия)
-  bot.on('document', async (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) return;
-
-    const state = adminStates.get(ctx.from.id);
-    if (state && state.step === 'waiting_for_catalog_file') {
-      const document = ctx.message.document;
-
-      // Проверка типа файла
-      if (!CONFIG.ALLOWED_FILE_TYPES.includes(document.mime_type)) {
-        return ctx.reply('❌ Неверный формат файла. Отправьте JSON файл.');
-      }
-
-      try {
-        // Получаем файл
-        const fileLink = await ctx.telegram.getFileLink(document.file_id);
-        const response = await fetch(fileLink);
-        const jsonData = await response.json();
-
-        // Валидация данных
-        if (!jsonData.products || !Array.isArray(jsonData.products)) {
-          return ctx.reply('❌ Неверный формат JSON. Ожидается массив products');
-        }
-
-        // Проверяем обязательные поля
-        for (const product of jsonData.products) {
-          if (!product.sku || !product.name || !product.price || !product.urlSite || !product.urlSiteImage) {
-            return ctx.reply('❌ В JSON отсутствуют обязательные поля (sku, name, price, urlSite, urlSiteImage)');
-          }
-        }
-
-        // Сохраняем в JS файл с правильным форматом
-        const catalogPath = path.join(__dirname, 'catalogProducts.js');
-        const jsContent = `const catalogProductsData = ${JSON.stringify(jsonData, null, 2)};\n\nmodule.exports = catalogProductsData;`;
-
-        await fs.writeFile(catalogPath, jsContent);
-
-        // Обновляем кэш
-        catalogProductsData.products = jsonData.products;
-
-        adminStates.delete(ctx.from.id);
-        ctx.reply(`✅ Каталог обновлен! Добавлено товаров: ${jsonData.products.length}`);
-
-      } catch (error) {
-        console.error('Ошибка загрузки каталога:', error);
-        ctx.reply('❌ Ошибка при обработке файла: ' + error.message);
-      }
-    }
-  });
-
   // Обработка медиа и текста для админов
 
-  bot.on('text', (ctx) => adminHandlers.handlePostText(ctx));
-  bot.on('text', (ctx) => adminHandlers.handleBroadcast(ctx));
-  bot.on('photo', (ctx) => adminHandlers.handlePhotoUpload(ctx));
+
 
 
   // Fallback

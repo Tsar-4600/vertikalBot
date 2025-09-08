@@ -75,6 +75,48 @@
       "createdBy": "Tsar1_1",
       "createdAt": "2025-09-07T08:27:25.465Z",
       "status": "draft"
+    },
+    {
+      "id": 1757317677064,
+      "text": "хелоу",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-08T07:47:57.064Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T07:47:59.515Z"
+    },
+    {
+      "id": 1757317891122,
+      "text": "тестовик",
+      "createdBy": "Old_Garik_Boroda",
+      "createdAt": "2025-09-08T07:51:31.122Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T07:51:36.714Z"
+    },
+    {
+      "id": 1757320586406,
+      "text": "hello",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-08T08:36:26.406Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T08:36:28.315Z"
+    },
+    {
+      "id": 1757320639606,
+      "text": "ТЕствоый с фоткой",
+      "photo": "AgACAgIAAxkBAAICSWi-lb_AFw9yzW0hOX_FKUhpmjSMAAJP-zEb5PLwSRdU1dvZDMesAQADAgADeAADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-08T08:37:19.606Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T08:37:21.798Z"
+    },
+    {
+      "id": 1757328180503,
+      "text": "Тестовый пост",
+      "photo": "AgACAgIAAxkBAAICtmi-szQoKH36zcBd4zJsMmshp2k3AAKb-zEb5PL4SdRI90vu4XA7AQADAgADeAADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-08T10:43:00.503Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T10:43:02.028Z"
     }
   ]
 }
