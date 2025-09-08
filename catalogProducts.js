@@ -1,13 +1,6 @@
 const catalogProductsData = {
   "products": [
     {
-      "sku": "AUT-GSV-URA-КО4405У_K--4320-6951-72",
-      "name": "тестовый автомобиль12313123123123123",
-      "price": 10990000,
-      "urlSite": "https://gkvertikal.ru/musorovoz-ko-440-5u-na-shassi-ural-next-4320-6951-72/",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370_Страница_1-570x570.png"
-    },
-    {
       "sku": "AUT-FTR-URA-ATZ12_T--4320-4971-80--2SEC",
       "name": "Автотопливозаправщик АТЗ-12 двухсекционный на шасси Урал-М 4320-4971-80",
       "price": 9200000,
