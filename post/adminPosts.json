@@ -90,7 +90,7 @@
       "createdBy": "Old_Garik_Boroda",
       "createdAt": "2025-09-08T07:51:31.122Z",
       "status": "published",
-      "publishedAt": "2025-09-08T07:51:36.714Z"
+      "publishedAt": "2025-09-09T10:50:42.441Z"
     },
     {
       "id": 1757320586406,
@@ -117,6 +117,24 @@
       "createdAt": "2025-09-08T10:43:00.503Z",
       "status": "published",
       "publishedAt": "2025-09-08T10:43:02.028Z"
+    },
+    {
+      "id": 1757331082519,
+      "text": "Привет",
+      "photo": "AgACAgIAAxkBAAIDGGi-vopC4adItl_3gkjVgyuxZiYLAAIN_DEb5PL4SUPOyaH3cBmvAQADAgADeAADNgQ",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-08T11:31:22.519Z",
+      "status": "published",
+      "publishedAt": "2025-09-08T11:31:25.232Z"
+    },
+    {
+      "id": 1757415078174,
+      "text": "Тестовая рассылка",
+      "photo": "AgACAgIAAxkBAAIDWmjABqb3k1Fz0lxDRjfXQVDPPj5wAAIo_DEbJfUAAUogSo0kjk3TXgEAAwIAA3gAAzYE",
+      "createdBy": "Tsar1_1",
+      "createdAt": "2025-09-09T10:51:18.174Z",
+      "status": "published",
+      "publishedAt": "2025-09-09T10:52:20.185Z"
     }
   ]
 }

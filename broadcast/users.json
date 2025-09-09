@@ -1,0 +1,16 @@
+{
+  "users": [
+    {
+      "id": 2055840373,
+      "subscribe": true,
+      "username": "Tsar1_1",
+      "firstName": "Nikita",
+      "lastName": "Tsar'",
+      "updatedAt": "2025-09-09T10:52:28.391Z"
+    },
+    {
+      "id": 252833035,
+      "subscribe": true
+    }
+  ]
+}
