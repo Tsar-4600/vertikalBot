@@ -62,7 +62,7 @@ const catalogProductsData = {
       "category": "АКН",
       "price": 11000000,
       "urlSite": "https://gkvertikal.ru/vakuumnye-neftepromyslovye-akns-10m3-na-shassi-ural-4320-6951-72/ ",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/avtotsisterna/AKN/AKNS10_T-4320-6925-72/WhatsApp%20Image%202025-08-05%20at%2017.28.11%20 (12)-570x570.png"
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/avtotsisterna/AKN/AKNS10_T-4320-6925-72/WhatsApp%20Image%202025-08-05%20at%2017.28.11%20(12)-570x570.png"
     },
     {
       "sku": "AUT-FTR-URA-ATZ12_T--4320-6951-72--2SEC",
@@ -158,7 +158,7 @@ const catalogProductsData = {
       "category": "Самосвалы",
       "price": 9590000,
       "urlSite": "https://gkvertikal.ru/vahtovyj-avtobus-berloga-na-shassi-ural-next-4320-6952-72-6x6-28-mest/ ",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370 _ Страница_1-570x570.png"
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370_Страница_1-570x570.png"
     },
     {
       "sku": "AUT-GSV-URA-КО4405У_K--4320-6951-72",
@@ -166,7 +166,7 @@ const catalogProductsData = {
       "category": "Мусоровозы",
       "price": 10990000,
       "urlSite": "https://gkvertikal.ru/musorovoz-ko-440-5u-na-shassi-ural-next-4320-6951-72/ ",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370 _ Страница_1-570x570.png"
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370_Страница_1-570x570.png"
     },
     {
       "sku": "SPC-CRN-IVA-KS-45717-1R",

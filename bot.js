@@ -24,6 +24,37 @@ const CONFIG = {
         chatId: process.env.PETERSBURG_MANAGER_CHAT_ID_1
       },
     ],
+    'rostov': [
+      {
+        username: process.env.ROSTOV_MANAGER_USERNAME_1 || '@manager_rostov',
+        chatId: process.env.ROSTOV_MANAGER_CHAT_ID_1
+      },
+    ],
+    'sochi': [
+      {
+        username: process.env.SOCHI_MANAGER_USERNAME_1 || '@manager_sochi1',
+        chatId: process.env.SOCHI_MANAGER_CHAT_ID_1
+      },
+    ],
+    'simferopl': [
+      {
+        username: process.env.SIMFEROPL_MANAGER_USERNAME_1 || '@manager_simferopl1',
+        chatId: process.env.SIMFEROPL_MANAGER_CHAT_ID_1
+      },
+    ],
+    'ekaterinburg': [
+      {
+        username: process.env.EKB_MANAGER_USERNAME_1 || '@manager_ekb1',
+        chatId: process.env.EKB_MANAGER_CHAT_ID_1
+      },
+    ],
+    'kazan': [
+      {
+        username: process.env.KAZAN_MANAGER_USERNAME_1 || '@manager_kazan1',
+        chatId: process.env.KAZAN_MANAGER_CHAT_ID_1
+      },
+    ],
+
     'other': [
       {
         username: process.env.GENERAL_MANAGER_USERNAME_1 || '@general_manager1',
@@ -97,6 +128,11 @@ const utils = {
     const regions = {
       'moscow': 'Москва',
       'petersburg': 'Санкт-Петербург',
+      'rostov': 'Ростов',
+      'sochi': 'Сочи',
+      'simferopl': 'Симферопль',
+      'ekaterinburg': 'Екатеринбург',
+      'kazan': 'Казань',
       'other': 'Другой регион'
     };
     return regions[regionCode] || 'Неизвестный регион';
@@ -245,14 +281,6 @@ async function handlePhotoUpload(ctx) {
   }
 }
 
-async function handleBroadcast(ctx) {
-  if (!utils.isAdmin(ctx.from.id)) return;
-
-  ctx.reply('⏳ Начинаю рассылку... Это может занять время');
-  // Логика рассылки будет здесь
-  adminStates.delete(ctx.from.id);
-  ctx.reply('✅ Рассылка завершена');
-}
 //
 // Сервис работы с постами
 //
@@ -759,8 +787,6 @@ async function createTextPost(ctx, text) {
 const userHandlers = {
   start: async (ctx) => {
     const user = ctx.from;
-    const userRegion = userRegions.get(user.id);
-    const regionInfo = userRegion ? `\n📍 Ваш регион: ${utils.getRegionName(userRegion)}` : '';
 
     // Добавляем пользователя в подписки
     const subscribed = await subscriptionService.subscribeUser(
@@ -774,8 +800,9 @@ const userHandlers = {
       '✅ Вы подписаны на рассылку' :
       '❌ Не удалось оформить подписку';
 
-    const welcomeText = `🚛 Добро пожаловать в каталог спецтехники!${regionInfo}\n\n` +
+    const welcomeText = `🚛 Добро пожаловать в каталог спецтехники!\n\n` +
       `${subscriptionStatus}\n\n` +
+
       `Здесь вы можете ознакомиться с нашей продукцией.\n` +
       `Нажмите /catalog чтобы посмотреть товары\n` +
       `/help для помощи\n\n` +
@@ -879,8 +906,8 @@ const adminHandlers = {
 
     ctx.reply('🛠️ Панель администратора:', Markup.keyboard([
       ['📝 Создать пост', '📊 Статистика постов'],
-      ['👥 Рассылка', '📤 Загрузить каталог'],
-      ['📊 Подписчики', '⬅️ Назад']
+      ['📤 Загрузить каталог'],
+      ['📊 Подписчики']
     ]).resize());
   },
   uploadCatalog: (ctx) => {
@@ -1218,15 +1245,6 @@ const adminHandlers = {
     }
   },
 
-  startBroadcast: (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) {
-      return ctx.reply('❌ У вас нет прав доступа');
-    }
-
-    adminStates.set(ctx.from.id, { step: 'waiting_for_broadcast' });
-    ctx.reply('📢 Введите сообщение для рассылки:');
-  },
-
   handleBroadcast: async (ctx) => {
     if (!utils.isAdmin(ctx.from.id)) return;
 
@@ -1326,12 +1344,25 @@ const applicationHandlers = {
         '📍 Выберите ваш регион:',
         Markup.inlineKeyboard([
           [
-            Markup.button.callback('🏢 Москва', 'region_moscow'),
-            Markup.button.callback('🏛️ Санкт-Петербург', 'region_petersburg')
+            Markup.button.callback('Санкт-Петербург', 'region_petersburg'),
+
+          ],
+          [
+            Markup.button.callback('Ростов', 'region_rostov'),
+            Markup.button.callback('Сочи', 'region_sochi')
+          ],
+          [
+            Markup.button.callback('Симферополь', 'region_simferopl'),
+            Markup.button.callback('Екатеринбург', 'region_ekaterinburg'),
+          ],
+          [
+            Markup.button.callback('Казань', 'region_kazan'),
+            Markup.button.callback('Москва', 'region_moscow'),
+
           ],
           [
             Markup.button.callback('🌍 Другой регион', 'region_other')
-          ]
+          ],
         ])
       );
 
@@ -1390,7 +1421,6 @@ ${managerMentions}
 <b>👤 Информация о клиенте:</b>
 • Имя: ${utils.escapeHtml(firstName)}
 • Username: ${username}
-• User ID: ${user.id}
 
 <b>🔗 Ссылки для связи:</b>
 ${username !== 'не указан' ? `• Написать в Telegram: https://t.me/${user.username}` : '• Telegram: недоступен'}
@@ -1497,7 +1527,6 @@ function setupBotHandlers() {
 
   bot.hears('📝 Создать пост', adminHandlers.startPostCreation);
   bot.hears('📊 Статистика постов', adminHandlers.showPostStats);
-  bot.hears('👥 Рассылка', adminHandlers.startBroadcast);
   bot.hears('📤 Загрузить каталог', adminHandlers.uploadCatalog);
   bot.hears('📊 Подписчики', adminHandlers.showSubscriberStats);
 
