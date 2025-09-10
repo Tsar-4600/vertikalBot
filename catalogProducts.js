@@ -166,7 +166,7 @@ const catalogProductsData = {
       "category": "Мусоровозы",
       "price": 10990000,
       "urlSite": "https://gkvertikal.ru/musorovoz-ko-440-5u-na-shassi-ural-next-4320-6951-72/ ",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/samosvaly/ural/6370-302C/6370_Страница_1-570x570.png"
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/musorovozy/КО4405У_K--4320-6951-72/WhatsApp%20Image%202025-09-04%20at%2012.18.33-570x570.png"
     },
     {
       "sku": "SPC-CRN-IVA-KS-45717-1R",
