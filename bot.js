@@ -388,7 +388,7 @@ const productService = {
     const reply_markup = {
       inline_keyboard: [
         [
-          { text: '🌐 Перейти на сайте', url: product.urlSite },
+          { text: '🌐 Перейти на сайт', url: product.urlSite },
           { text: '📝 Оставить заявку', callback_data: `application_${product.sku}` }
         ],
         navigationButtons,
