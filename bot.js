@@ -107,6 +107,19 @@ const utils = {
     return regionManagers.map(manager => manager.username).join(' ');
   },
 
+
+  // Форматирование названий категорий
+  formatCategoryName: (category) => {
+    const categoryMap = {
+      'АТЗ': '🚛 Автотопливозаправщики',
+      'КМУ': '🏗️ Крано-манипуляторные установки',
+      'Спецтехника': '🚜 Спецтехника',
+      'Запчасти': '🔧 Запчасти'
+      // добавьте другие маппинги по необходимости
+    };
+
+    return categoryMap[category] || category;
+  },
   isAdmin: (userId) => CONFIG.ADMIN_IDS.includes(userId.toString())
 };
 
@@ -310,11 +323,23 @@ const postService = {
 // Сервис работы с товарами
 //
 const productService = {
-  showProduct(ctx, productIndex) {
-    const products = catalogProductsData.products;
+  // Получение всех уникальных категорий
+  getAllCategories() {
+    const categories = [...new Set(catalogProductsData.products.map(item => item.category))];
+    return categories.sort();
+  },
+
+  // Получение товаров по категории
+  getProductsByCategory(category) {
+    return catalogProductsData.products.filter(item => item.category === category);
+  },
+
+  // Показ товара с навигацией
+  showProduct(ctx, category, productIndex) {
+    const products = this.getProductsByCategory(category);
 
     if (products.length === 0) {
-      return ctx.reply('😔 Каталог товаров пуст');
+      return ctx.reply('😔 В этой категории нет товаров');
     }
 
     let index = productIndex;
@@ -322,13 +347,43 @@ const productService = {
     if (index < 0) index = products.length - 1;
 
     const product = products[index];
-    userStates.set(ctx.from.id, index);
+
+    // Сохраняем состояние пользователя
+    userStates.set(ctx.from.id, {
+      category: category,
+      index: index,
+      total: products.length
+    });
 
     const escapedName = utils.escapeMarkdown(product.name);
 
     const caption = `🏗️ *${escapedName}*\n\n` +
+      `📂 Категория: ${utils.escapeMarkdown(product.category)}\n` +
       `💰 Цена: ${product.price.toLocaleString('ru-RU')} руб.\n\n` +
       `ℹ️ Подробное описание на нашем сайте`;
+
+    const navigationButtons = [];
+
+    if (products.length > 1) {
+      if (index > 0) {
+        navigationButtons.push({
+          text: '⬅️ Назад',
+          callback_data: `nav_${category}_${index - 1}`
+        });
+      }
+
+      navigationButtons.push({
+        text: `${index + 1}/${products.length}`,
+        callback_data: 'page_info'
+      });
+
+      if (index < products.length - 1) {
+        navigationButtons.push({
+          text: 'Вперед ➡️',
+          callback_data: `nav_${category}_${index + 1}`
+        });
+      }
+    }
 
     const reply_markup = {
       inline_keyboard: [
@@ -336,9 +391,9 @@ const productService = {
           { text: '🌐 Перейти на сайте', url: product.urlSite },
           { text: '📝 Оставить заявку', callback_data: `application_${product.sku}` }
         ],
+        navigationButtons,
         [
-          { text: '⬅️ Предыдущая', callback_data: `prev_${index}` },
-          { text: '➡️ Следующая', callback_data: `next_${index}` }
+          { text: '↩️ К категориям', callback_data: 'back_to_categories' }
         ]
       ]
     };
@@ -356,8 +411,172 @@ const productService = {
     });
   },
 
+
+  // Показ категорий с пагинацией
+  showCategories(ctx, page = 0, itemsPerPage = 8) {
+    const categories = this.getAllCategories();
+
+    if (categories.length === 0) {
+      return ctx.reply('😔 Категории не найдены');
+    }
+
+    // Рассчитываем пагинацию
+    const totalPages = Math.ceil(categories.length / itemsPerPage);
+    const startIndex = page * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    const currentCategories = categories.slice(startIndex, endIndex);
+
+    // Создаем кнопки категорий (по 2 в ряд)
+    const categoryButtons = [];
+    for (let i = 0; i < currentCategories.length; i += 2) {
+      const row = [];
+      if (currentCategories[i]) {
+        row.push({
+          text: currentCategories[i],
+          callback_data: `category_${currentCategories[i]}_0`
+        });
+      }
+      if (currentCategories[i + 1]) {
+        row.push({
+          text: currentCategories[i + 1],
+          callback_data: `category_${currentCategories[i + 1]}_0`
+        });
+      }
+      categoryButtons.push(row);
+    }
+
+    // Добавляем кнопки навигации
+    const navigationButtons = [];
+
+    if (page > 0) {
+      navigationButtons.push({
+        text: '⬅️ Назад',
+        callback_data: `categories_page_${page - 1}`
+      });
+    }
+
+    navigationButtons.push({
+      text: `${page + 1}/${totalPages}`,
+      callback_data: 'categories_info'
+    });
+
+    if (page < totalPages - 1) {
+      navigationButtons.push({
+        text: 'Вперед ➡️',
+        callback_data: `categories_page_${page + 1}`
+      });
+    }
+
+    if (navigationButtons.length > 0) {
+      categoryButtons.push(navigationButtons);
+    }
+
+    // Добавляем кнопку закрытия
+    categoryButtons.push([{ text: '❌ Закрыть', callback_data: 'close_catalog' }]);
+
+    const messageText = `📂 Выберите категорию (страница ${page + 1}/${totalPages}):`;
+
+    // Если это callback query (нажатие на кнопку) и есть message
+    if (ctx.update.callback_query && ctx.update.callback_query.message) {
+      const message = ctx.update.callback_query.message;
+
+      // Проверяем, есть ли текст в сообщении (не фото/документ и т.д.)
+      if (message.text) {
+        // Редактируем текст сообщения
+        return ctx.editMessageText(messageText, {
+          reply_markup: {
+            inline_keyboard: categoryButtons
+          }
+        });
+      } else {
+        // Если сообщение без текста (например, фото), удаляем его и создаем новое
+        ctx.deleteMessage(message.message_id).catch(console.error);
+      }
+    }
+
+    // Создаем новое сообщение
+    return ctx.reply(messageText, {
+      reply_markup: {
+        inline_keyboard: categoryButtons
+      }
+    });
+  },
+
   findProductBySku(sku) {
     return catalogProductsData.products.find(p => p.sku === sku);
+  }
+};
+
+// Обработчики каталога
+const catalogHandlers = {
+  // Показ категорий
+  showCatalog: (ctx) => {
+    productService.showCategories(ctx, 0);
+  },
+
+  // Обработка пагинации категорий с обработкой ошибок
+  handleCategoriesPage: async (ctx) => {
+    try {
+      const page = parseInt(ctx.match[1]);
+      await productService.showCategories(ctx, page);
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Ошибка при пагинации категорий:', error);
+      // Если не удалось отредактировать, создаем новое сообщение
+      await ctx.answerCbQuery('⚠️ Обновление...');
+      await productService.showCategories(ctx, parseInt(ctx.match[1]));
+    }
+  },
+
+  // Информация о странице категорий
+  handleCategoriesInfo: (ctx) => {
+    ctx.answerCbQuery('Страница категорий');
+  },
+
+  // Обработка выбора категории
+  handleCategorySelect: (ctx) => {
+    const category = ctx.match[1];
+    const productIndex = parseInt(ctx.match[2]);
+
+    productService.showProduct(ctx, category, productIndex);
+    ctx.answerCbQuery();
+  },
+
+  // Навигация по товарам
+  handleNavigation: (ctx) => {
+    const category = ctx.match[1];
+    const productIndex = parseInt(ctx.match[2]);
+
+    productService.showProduct(ctx, category, productIndex);
+    ctx.answerCbQuery();
+  },
+
+  // Возврат к категориям
+  handleBackToCategories: (ctx) => {
+    // Удаляем текущее сообщение с товаром
+    if (ctx.update.callback_query && ctx.update.callback_query.message) {
+      ctx.deleteMessage().catch(console.error);
+    }
+
+    // Показываем категории с первой страницы
+    setTimeout(() => {
+      productService.showCategories(ctx, 0);
+    }, 100);
+
+    ctx.answerCbQuery();
+  },
+
+  // Закрытие каталога
+  handleCloseCatalog: (ctx) => {
+    if (ctx.update.callback_query && ctx.update.callback_query.message) {
+      ctx.deleteMessage().catch(console.error);
+    }
+    ctx.answerCbQuery('Каталог закрыт');
+  },
+
+  // Информация о странице
+  handlePageInfo: (ctx) => {
+    ctx.answerCbQuery('Текущая страница товара');
   }
 };
 //
@@ -524,7 +743,7 @@ const userHandlers = {
   },
 
   showCatalog: (ctx) => {
-    productService.showProduct(ctx, 0);
+    catalogHandlers.showCatalog(ctx);
   },
 
   showWebsite: (ctx) => {
@@ -1252,8 +1471,14 @@ function setupBotHandlers() {
   bot.action(/^publish_(\d+)$/, (ctx) => adminHandlers.handleInlinePublish(ctx));
   bot.action(/^delete_(\d+)$/, (ctx) => adminHandlers.handleInlineDelete(ctx));
 
-  // Обработка медиа и текста для админов
-
+  // Inline кнопки каталога
+  bot.action(/^categories_page_(\d+)$/, (ctx) => catalogHandlers.handleCategoriesPage(ctx));
+  bot.action('categories_info', (ctx) => catalogHandlers.handleCategoriesInfo(ctx));
+  bot.action(/^category_(.+)_(\d+)$/, (ctx) => catalogHandlers.handleCategorySelect(ctx));
+  bot.action(/^nav_(.+)_(\d+)$/, (ctx) => catalogHandlers.handleNavigation(ctx));
+  bot.action('back_to_categories', (ctx) => catalogHandlers.handleBackToCategories(ctx));
+  bot.action('close_catalog', (ctx) => catalogHandlers.handleCloseCatalog(ctx));
+  bot.action('page_info', (ctx) => catalogHandlers.handlePageInfo(ctx));
 
 
 
