@@ -111,8 +111,6 @@ const utils = {
   // Форматирование названий категорий
   formatCategoryName: (category) => {
     const categoryMap = {
-      'АТЗ': '🚛 Автотопливозаправщики',
-      'КМУ': '🏗️ Крано-манипуляторные установки',
       'Спецтехника': '🚜 Спецтехника',
       'Запчасти': '🔧 Запчасти'
       // добавьте другие маппинги по необходимости
@@ -411,10 +409,9 @@ const productService = {
     });
   },
 
-
   // Показ категорий с пагинацией
-  showCategories(ctx, page = 0, itemsPerPage = 8) {
-    const categories = this.getAllCategories();
+  showCategories: async function (ctx, page = 0, itemsPerPage = 8) {
+    const categories = this.getAllCategories(); // Теперь this будет корректным
 
     if (categories.length === 0) {
       return ctx.reply('😔 Категории не найдены');
@@ -432,13 +429,13 @@ const productService = {
       const row = [];
       if (currentCategories[i]) {
         row.push({
-          text: currentCategories[i],
+          text: utils.formatCategoryName(currentCategories[i]),
           callback_data: `category_${currentCategories[i]}_0`
         });
       }
       if (currentCategories[i + 1]) {
         row.push({
-          text: currentCategories[i + 1],
+          text: utils.formatCategoryName(currentCategories[i + 1]),
           callback_data: `category_${currentCategories[i + 1]}_0`
         });
       }
@@ -480,17 +477,22 @@ const productService = {
     if (ctx.update.callback_query && ctx.update.callback_query.message) {
       const message = ctx.update.callback_query.message;
 
-      // Проверяем, есть ли текст в сообщении (не фото/документ и т.д.)
-      if (message.text) {
-        // Редактируем текст сообщения
-        return ctx.editMessageText(messageText, {
+      try {
+        // Пытаемся отредактировать сообщение
+        await ctx.editMessageText(messageText, {
           reply_markup: {
             inline_keyboard: categoryButtons
           }
         });
-      } else {
-        // Если сообщение без текста (например, фото), удаляем его и создаем новое
-        ctx.deleteMessage(message.message_id).catch(console.error);
+        return;
+      } catch (editError) {
+        // Если не удалось отредактировать (например, сообщение с фото), 
+        // удаляем старое и создаем новое
+        try {
+          await ctx.deleteMessage();
+        } catch (deleteError) {
+          // Игнорируем ошибку удаления
+        }
       }
     }
 
@@ -550,20 +552,64 @@ const catalogHandlers = {
     productService.showProduct(ctx, category, productIndex);
     ctx.answerCbQuery();
   },
-
   // Возврат к категориям
-  handleBackToCategories: (ctx) => {
-    // Удаляем текущее сообщение с товаром
-    if (ctx.update.callback_query && ctx.update.callback_query.message) {
-      ctx.deleteMessage().catch(console.error);
+  handleBackToCategories: async (ctx) => {
+    try {
+      // Вместо удаления сообщения, редактируем его чтобы показать категории
+      if (ctx.update.callback_query && ctx.update.callback_query.message) {
+        const message = ctx.update.callback_query.message;
+
+        // Проверяем, есть ли фото в сообщении (это сообщение с товаром)
+        if (message.photo) {
+          // Если это сообщение с фото, удаляем его и создаем новое с категориями
+          try {
+            await ctx.deleteMessage();
+          } catch (deleteError) {
+            // Игнорируем ошибку "message to delete not found"
+            if (deleteError.response && deleteError.response.error_code === 400 &&
+              deleteError.response.description.includes('message to delete not found')) {
+              console.log('Сообщение уже удалено, продолжаем...');
+            } else {
+              console.error('Ошибка при удалении сообщения:', deleteError);
+            }
+          }
+          // Показываем категории
+          await productService.showCategories(ctx, 0);
+        } else {
+          // Если это текстовое сообщение, редактируем его
+          try {
+            await productService.showCategories(ctx, 0);
+          } catch (editError) {
+            // Если не удалось отредактировать, создаем новое сообщение
+            console.error('Ошибка при редактировании сообщения:', editError);
+            await productService.showCategories(ctx, 0);
+          }
+        }
+      } else {
+        // Если нет сообщения callback_query, просто показываем категории
+        await productService.showCategories(ctx, 0);
+      }
+
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Ошибка в handleBackToCategories:', error);
+
+      // Если не удалось отредактировать, создаем новое сообщение
+      try {
+        await ctx.reply('📂 Выберите категорию:', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🔄 Попробовать снова', callback_data: 'back_to_categories' }],
+              [{ text: '❌ Закрыть', callback_data: 'close_catalog' }]
+            ]
+          }
+        });
+      } catch (fallbackError) {
+        console.error('Не удалось отправить fallback сообщение:', fallbackError);
+      }
+
+      await ctx.answerCbQuery('⚠️ Произошла ошибка');
     }
-
-    // Показываем категории с первой страницы
-    setTimeout(() => {
-      productService.showCategories(ctx, 0);
-    }, 100);
-
-    ctx.answerCbQuery();
   },
 
   // Закрытие каталога
