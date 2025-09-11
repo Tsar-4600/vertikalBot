@@ -9,14 +9,6 @@ const catalogProductsData = {
       "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/atz/ATZ12_T--4320-4971-80--2SEC/WhatsApp%20Image%202025-07-22%20at%2010.25.44%20(1)-570x570.png"
     },
     {
-      "sku": "AUT-PWT-URA-ACPT-10_T--4320-6951-72--1SEC",
-      "name": "Автоцистерны для питьевой воды АЦПТ-10м3 на шасси Урал 4320-6951-72",
-      "category": "АЦПТ",
-      "price": 1000000,
-      "urlSite": "https://gkvertikal.ru/avtocisterny-dlya-pitevoj-vody-acpt-10m3-na-shassi-ural-4320-6951-72/ ",
-      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/avtotsisterna/ACPT/e826352c-0e4b-45e5-91f1-53cbdd1d3cc9-570x570.png "
-    },
-    {
       "sku": "AUT-TUG-URA-44202-3511-82",
       "name": "Седельный тягач Урал-М 44202-3511-82 6x6",
       "category": "Седельные тягачи",
@@ -263,6 +255,14 @@ const catalogProductsData = {
       "price": 15530000,
       "urlSite": "https://gkvertikal.ru/avtokran-ivanovec-ks-55717k-1/ ",
       "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/avtokrany/ivanovec/КС-55717К-1/001_IMG_7228_pavlov-570x570.png"
+    },
+    {
+      "sku": "AUT-LCM-URA-MART-1M--4320-6952-72",
+      "name": "Локомобиль MART-1М с КМУ ИНМАН IM-150N на шасси Урал NEXT 4320-6952-72 6х6",
+      "category": "Особого назначения",
+      "price": 32028000,
+      "urlSite": "https://gkvertikal.ru/lokomobil-mart-1m-na-shassi-ural-next-4320-6952-72-6h6/",
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/osobogo-naznacheniya/LCM-URA-MART-1M--4320-6952-72/front-570x570.png"
     }
   ]
 };
