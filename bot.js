@@ -11,6 +11,7 @@ const CONFIG = {
   SALE_CHAT_ID: process.env.SALE_CHAT_ID,
   CHANNEL_ID: process.env.CHANNEL_ID,
   ALLOWED_FILE_TYPES: ['application/json', 'text/plain'],
+  ALLOWED_MEDIA_TYPES: ['photo', 'video'],
   MANAGERS: {
     'moscow': [
       {
@@ -154,14 +155,34 @@ const utils = {
 
     return categoryMap[category] || category;
   },
-  isAdmin: (userId) => CONFIG.ADMIN_IDS.includes(userId.toString())
+  isAdmin: (userId) => {
+    if (!userId) return false; // Защита от undefined
+    return CONFIG.ADMIN_IDS.includes(userId.toString());
+  },
+
+  // Безопасная проверка админа из контекста
+  isAdminFromCtx: (ctx) => {
+    if (!ctx.from || !ctx.from.id) return false;
+    return CONFIG.ADMIN_IDS.includes(ctx.from.id.toString());
+  }
 };
 
 // Добавляем middleware для обработки состояний
 bot.use(async (ctx, next) => {
-  const userId = ctx.from.id;
-  const state = adminStates.get(userId);
+  // Полностью игнорируем channel_post и edited_channel_post
+  if (ctx.update.channel_post || ctx.update.edited_channel_post) {
+    console.log('Ignoring channel post update');
+    return;
+  }
 
+  // Продолжаем только если есть пользователь
+  if (!ctx.from) {
+    return await next();
+  }
+
+  const userId = ctx.from?.id;
+  if (!userId) return await next();
+  const state = adminStates.get(userId);
   // Если пользователь в состоянии ожидания файла каталога и это документ
   if (state && state.step === 'waiting_for_catalog_file' && ctx.message && ctx.message.document) {
     await handleCatalogUpload(ctx);
@@ -174,10 +195,10 @@ bot.use(async (ctx, next) => {
     return;
   }
 
-  // Если пользователь в состоянии ожидания фото поста
-  if (state && state.step === 'waiting_for_photo') {
-    if (ctx.message && ctx.message.photo) {
-      await handlePhotoUpload(ctx);
+  // Если пользователь в состоянии ожидания media поста
+  if (state && state.step === 'waiting_for_media') {
+    if (ctx.message && (ctx.message.photo || ctx.message.video)) {
+      await adminHandlers.handleMediaUpload(ctx);
       return;
     } else if (ctx.message && ctx.message.text && ctx.message.text.toLowerCase() === 'нет') {
       await createTextPost(ctx, state.text);
@@ -197,7 +218,7 @@ bot.use(async (ctx, next) => {
 
 // Выносим обработчики в отдельные функции
 async function handleCatalogUpload(ctx) {
-  if (!utils.isAdmin(ctx.from.id)) return;
+  if (!utils.isAdminFromCtx(ctx)) return;
 
   const document = ctx.message.document;
 
@@ -243,43 +264,14 @@ async function handleCatalogUpload(ctx) {
 }
 
 async function handlePostText(ctx) {
-  if (!utils.isAdmin(ctx.from.id)) return;
-
+  if (!utils.isAdminFromCtx(ctx)) return;
   adminStates.set(ctx.from.id, {
-    step: 'waiting_for_photo',
+    step: 'waiting_for_media', // <-- ИСПРАВЛЕНО: теперь совпадает с middleware!
     text: ctx.message.text
   });
+  ctx.reply('✅ Текст сохранен. Теперь отправьте фото, видео или отправьте "нет" если без медиа:');
+};
 
-  ctx.reply('✅ Текст сохранен. Теперь отправьте фото для поста (или отправьте "нет" если без фото):');
-}
-
-async function handlePhotoUpload(ctx) {
-  if (!utils.isAdmin(ctx.from.id)) return;
-
-  const state = adminStates.get(ctx.from.id);
-
-  if (state && state.step === 'waiting_for_photo') {
-    const photo = ctx.message.photo[ctx.message.photo.length - 1];
-    const fileId = photo.file_id;
-
-    try {
-      const newPost = await postService.createPost({
-        text: state.text,
-        photo: fileId,
-        createdBy: ctx.from.username || ctx.from.first_name
-      });
-
-      adminStates.delete(ctx.from.id);
-
-      ctx.replyWithPhoto(fileId, {
-        caption: `✅ Пост создан! Статус: черновик\n\nID: ${newPost.id}\n\nИспользуйте команду /publish_${newPost.id} для публикации`
-      });
-    } catch (error) {
-      console.error('Ошибка создания поста с фото:', error);
-      ctx.reply('❌ Ошибка при создании поста');
-    }
-  }
-}
 
 //
 // Сервис работы с постами
@@ -309,7 +301,8 @@ const postService = {
       id: Date.now(),
       ...postData,
       createdAt: new Date().toISOString(),
-      status: 'draft'
+      status: 'draft',
+      mediaType: postData.mediaType || 'text' // 'text', 'photo', 'video'
     };
 
     adminPosts.posts.push(newPost);
@@ -772,16 +765,17 @@ async function createTextPost(ctx, text) {
   try {
     const newPost = await postService.createPost({
       text: text,
+      mediaType: 'text',
       createdBy: ctx.from.username || ctx.from.first_name
     });
 
     adminStates.delete(ctx.from.id);
-    ctx.reply(`✅ Пост создан (без фото)! Статус: черновик\n\nИспользуйте команду /publish_${newPost.id} для публикации`);
+    ctx.reply(`✅ Пост создан (без медиа)! Статус: черновик\n\nИспользуйте команду /publish_${newPost.id} для публикации`);
   } catch (error) {
     console.error('Ошибка создания поста:', error);
     ctx.reply('❌ Ошибка при создании поста');
   }
-}
+};
 
 // Обработчики команд пользователя
 const userHandlers = {
@@ -800,28 +794,40 @@ const userHandlers = {
       '✅ Вы подписаны на рассылку' :
       '❌ Не удалось оформить подписку';
 
-   const welcomeText = `🏗️ Добро пожаловать в официальный бот ГК «ВЕРТИКАЛЬ» — вашего надежного партнера в мире качественной спецтехники, запчастей и сервиса!\n\n` +
+    const welcomeText = `🏗️ Добро пожаловать в официальный бот ГК «ВЕРТИКАЛЬ» — вашего надежного партнера в мире качественной спецтехники, запчастей и сервиса!\n\n` +
       `${subscriptionStatus}\n\n` +
-
       `В этом боте вы можете:\n` +
-      `• 📖 Изучить каталог спецтехники и запчастей\n` +
-      `• 🔍 Узнать актуальные цены и наличие на складе\n` +
-      `• 🛠️ Узнать об услугах сервиса и технического обслуживания\n` +
+      `• 📖 Изучить каталог спецтехники\n` +
+      `• 🔍 Узнать актуальные цены\n` +
       `• 📩 Получить персональное коммерческое предложение\n` +
-      `• ✅ Следить за акциями и специальными предложениями\n\n` +
-
       `➡️ Чтобы начать, нажмите /catalog\n` +
       `❓ Возникли трудности? Команда /help всегда к вашим услугам.\n\n` +
-
       `ℹ️ Вы в любой момент можете управлять подпиской на рассылку через меню бота.`;
 
-    ctx.reply(welcomeText, Markup.keyboard([
-      ['📦 Показать каталог'],
-      ['🌐 Наш сайт', '📞 Контакты'],
-      ['❌ Отказаться от рассылки']
-    ]).resize());
-  },
+    try {
+      // Отправляем фото с подписью и клавиатурой
+      // ЗАМЕНИТЕ ССЫЛКУ НА АКТУАЛЬНУЮ ФОТОГРАФИЮ ВАШЕЙ КОМПАНИИ
+      await ctx.replyWithPhoto('https://gkvertikal.ru/image/catalog/logo2.png', {
+        caption: welcomeText,
+        parse_mode: 'HTML',
+        ...Markup.keyboard([
+          ['📦 Показать каталог'],
+          ['🌐 Наш сайт', '📞 Контакты'],
+          ['❌ Отказаться от рассылки']
+        ]).resize()
+      });
 
+    } catch (error) {
+      console.error('Ошибка при отправке приветственного сообщения с фото:', error);
+
+      // Фолбэк: отправляем только текст если фото не доступно
+      ctx.reply(welcomeText, Markup.keyboard([
+        ['📦 Показать каталог'],
+        ['🌐 Наш сайт', '📞 Контакты'],
+        ['❌ Отказаться от рассылки']
+      ]).resize());
+    }
+  },
   showCatalog: (ctx) => {
     catalogHandlers.showCatalog(ctx);
   },
@@ -907,7 +913,7 @@ const userHandlers = {
 // Обработчики админ-панели
 const adminHandlers = {
   showAdminPanel: (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) {
+    if (!utils.isAdminFromCtx(ctx)) {
       return ctx.reply('❌ У вас нет прав доступа к админке');
     }
 
@@ -918,7 +924,7 @@ const adminHandlers = {
     ]).resize());
   },
   uploadCatalog: (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) {
+    if (!utils.isAdminFromCtx(ctx)) {
       return ctx.reply('❌ У вас нет прав доступа');
     }
 
@@ -937,7 +943,7 @@ const adminHandlers = {
       '}');
   },
   startPostCreation: (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) {
+    if (!utils.isAdminFromCtx(ctx)) {
       return ctx.reply('❌ У вас нет прав доступа');
     }
 
@@ -946,58 +952,90 @@ const adminHandlers = {
   },
 
   handlePostText: (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) return;
+    if (!utils.isAdminFromCtx(ctx)) return;
 
     const state = adminStates.get(ctx.from.id);
 
     if (state && state.step === 'waiting_for_text') {
       adminStates.set(ctx.from.id, {
-        step: 'waiting_for_photo',
+        step: 'waiting_for_media',
         text: ctx.message.text
       });
 
-      ctx.reply('✅ Текст сохранен. Теперь отправьте фото для поста (или отправьте "нет" если без фото):');
-    }
-    else if (state && state.step === 'waiting_for_photo') {
-      if (ctx.message.text && ctx.message.text.toLowerCase() === 'нет') {
-        // Используем внешнюю функцию вместо this.createTextPost
-        createTextPost(ctx, state.text);
-      }
+      ctx.reply('✅ Текст сохранен. Теперь отправьте фото, видео или отправьте "нет" если без медиа:');
     }
   },
 
-  handlePhotoUpload: async (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) return;
+  handleMediaUpload: async (ctx) => {
+    if (!utils.isAdminFromCtx(ctx)) return;
 
     const state = adminStates.get(ctx.from.id);
 
-    if (state && state.step === 'waiting_for_photo') {
-      const photo = ctx.message.photo[ctx.message.photo.length - 1];
-      const fileId = photo.file_id;
+    if (state && state.step === 'waiting_for_media') {
+      let mediaId;
+      let mediaType;
+
+      if (ctx.message.photo) {
+        // Фото
+        mediaId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        mediaType = 'photo';
+      } else if (ctx.message.video) {
+        // Видео
+        mediaId = ctx.message.video.file_id;
+        mediaType = 'video';
+      } else if (ctx.message.text && ctx.message.text.toLowerCase() === 'нет') {
+        // Без медиа
+        await createTextPost(ctx, state.text);
+        return;
+      } else {
+        ctx.reply('❌ Пожалуйста, отправьте фото, видео или "нет"');
+        return;
+      }
 
       try {
         const newPost = await postService.createPost({
           text: state.text,
-          photo: fileId,
+          media: mediaId,
+          mediaType: mediaType,
           createdBy: ctx.from.username || ctx.from.first_name
         });
 
         adminStates.delete(ctx.from.id);
 
-        ctx.replyWithPhoto(fileId, {
-          caption: `✅ Пост создан! Статус: черновик\n\nID: ${newPost.id}\n\nИспользуйте команду /publish_${newPost.id} для публикации`
-        });
+        if (mediaType === 'photo') {
+          await ctx.replyWithPhoto(mediaId, {
+            caption: `✅ Пост создан! Статус: черновик\n\nID: ${newPost.id}\nТип: ${mediaType}\n\nИспользуйте команду /publish_${newPost.id} для публикации`
+          });
+        } else if (mediaType === 'video') {
+          await ctx.replyWithVideo(mediaId, {
+            caption: `✅ Пост создан! Статус: черновик\n\nID: ${newPost.id}\nТип: ${mediaType}\n\nИспользуйте команду /publish_${newPost.id} для публикации`
+          });
+        }
+
       } catch (error) {
-        console.error('Ошибка создания поста с фото:', error);
+        console.error('Ошибка создания поста с медиа:', error);
         ctx.reply('❌ Ошибка при создании поста');
       }
     }
   },
 
+  //метод публикации
+
+
   publishPost: async (ctx, postId) => {
     console.log(`[DEBUG] publishPost called for post ID: ${postId} by user ${ctx.from.id}`);
 
-    if (!utils.isAdmin(ctx.from.id)) {
+    if (ctx.update.channel_post || ctx.update.edited_channel_post) {
+      console.log('[DEBUG] Ignoring channel post in publishPost');
+      return;
+    }
+
+    // Проверяем, что это команда от пользователя, а не из канала
+    if (!ctx.from) {
+      console.log('[DEBUG] Ignoring channel post');
+      return;
+    }
+    if (!utils.isAdminFromCtx(ctx)) {
       console.log('[DEBUG] User is not admin, access denied.');
       return ctx.reply('❌ У вас нет прав доступа');
     }
@@ -1026,19 +1064,43 @@ const adminHandlers = {
 
       const targetChatId = CONFIG.CHANNEL_ID;
 
-      // Публикация в канал
+      // Публикация в канал (совместимость со старыми постами)
       console.log(`[DEBUG] Attempting to send message to channel ID: ${targetChatId}`);
-      if (post.photo) {
-        console.log('[DEBUG] Sending photo post to channel...');
-        await ctx.telegram.sendPhoto(targetChatId, post.photo, {
-          caption: post.text,
-          parse_mode: 'Markdown'
-        });
-      } else {
-        console.log('[DEBUG] Sending text post to channel...');
-        await ctx.telegram.sendMessage(targetChatId, post.text, {
-          parse_mode: 'Markdown'
-        });
+
+      // Для совместимости со старыми постами
+      const media = post.media || post.photo;
+      const mediaType = post.mediaType || (post.photo ? 'photo' : 'text');
+
+      try {
+        if (media) {
+          if (mediaType === 'photo') {
+            console.log('[DEBUG] Sending photo post to channel...');
+            await ctx.telegram.sendPhoto(targetChatId, media, {
+              caption: post.text,
+              parse_mode: 'Markdown'
+            });
+          } else if (mediaType === 'video') {
+            console.log('[DEBUG] Sending video post to channel...');
+            await ctx.telegram.sendVideo(targetChatId, media, {
+              caption: post.text,
+              parse_mode: 'Markdown'
+            });
+          }
+        } else {
+          console.log('[DEBUG] Sending text post to channel...');
+          await ctx.telegram.sendMessage(targetChatId, post.text, {
+            parse_mode: 'Markdown'
+          });
+        }
+        console.log('[DEBUG] Message successfully sent to channel!');
+      } catch (channelError) {
+        console.error('[DEBUG] Error sending to channel:', channelError);
+        // Продолжаем рассылку пользователям даже если ошибка в канале
+        if (channelError.response) {
+          throw new Error(`Ошибка канала: ${channelError.response.description}`);
+        } else {
+          throw new Error(`Ошибка канала: ${channelError.message}`);
+        }
       }
       console.log('[DEBUG] Message successfully sent to channel!');
 
@@ -1052,11 +1114,18 @@ const adminHandlers = {
 
       for (const user of subscribedUsers) {
         try {
-          if (post.photo) {
-            await ctx.telegram.sendPhoto(user.id, post.photo, {
-              caption: post.text,
-              parse_mode: 'Markdown'
-            });
+          if (media) {
+            if (mediaType === 'photo') {
+              await ctx.telegram.sendPhoto(user.id, media, {
+                caption: post.text,
+                parse_mode: 'Markdown'
+              });
+            } else if (mediaType === 'video') {
+              await ctx.telegram.sendVideo(user.id, media, {
+                caption: post.text,
+                parse_mode: 'Markdown'
+              });
+            }
           } else {
             await ctx.telegram.sendMessage(user.id, post.text, {
               parse_mode: 'Markdown'
@@ -1180,19 +1249,35 @@ const adminHandlers = {
       return ctx.reply('❌ Пост не найден');
     }
 
-    const statusEmoji = post.status === 'published' ? '✅' : '📝';
-    const caption = `📝 Пост ID: ${post.id}\nСтатус: ${post.status}\nСоздан: ${new Date(post.createdAt).toLocaleString('ru-RU')}\nАвтор: ${post.createdBy}\n\n${post.text}`;
+    // Для совместимости со старыми постами
+    const media = post.media || post.photo;
+    const mediaType = post.mediaType || (post.photo ? 'photo' : 'text');
 
-    if (post.photo) {
-      await ctx.replyWithPhoto(post.photo, {
-        caption: caption,
-        reply_markup: Markup.inlineKeyboard([
-          [
-            Markup.button.callback('✅ Опубликовать', `publish_${post.id}`),
-            Markup.button.callback('🗑️ Удалить', `delete_${post.id}`)
-          ]
-        ])
-      });
+    const statusEmoji = post.status === 'published' ? '✅' : '📝';
+    const caption = `📝 Пост ID: ${post.id}\nТип: ${mediaType}\nСтатус: ${post.status}\nСоздан: ${new Date(post.createdAt).toLocaleString('ru-RU')}\nАвтор: ${post.createdBy}\n\n${post.text}`;
+
+    if (media) {
+      if (mediaType === 'photo') {
+        await ctx.replyWithPhoto(media, {
+          caption: caption,
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback('✅ Опубликовать', `publish_${post.id}`),
+              Markup.button.callback('🗑️ Удалить', `delete_${post.id}`)
+            ]
+          ])
+        });
+      } else if (mediaType === 'video') {
+        await ctx.replyWithVideo(media, {
+          caption: caption,
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback('✅ Опубликовать', `publish_${post.id}`),
+              Markup.button.callback('🗑️ Удалить', `delete_${post.id}`)
+            ]
+          ])
+        });
+      }
     } else {
       ctx.reply(caption, {
         reply_markup: Markup.inlineKeyboard([
@@ -1216,11 +1301,22 @@ const adminHandlers = {
     try {
       const targetChatId = CONFIG.CHANNEL_ID;
 
-      if (post.photo) {
-        await ctx.telegram.sendPhoto(targetChatId, post.photo, {
-          caption: post.text,
-          parse_mode: 'Markdown'
-        });
+      // Для совместимости со старыми постами
+      const media = post.media || post.photo;
+      const mediaType = post.mediaType || (post.photo ? 'photo' : 'text');
+
+      if (media) {
+        if (mediaType === 'photo') {
+          await ctx.telegram.sendPhoto(targetChatId, media, {
+            caption: post.text,
+            parse_mode: 'Markdown'
+          });
+        } else if (mediaType === 'video') {
+          await ctx.telegram.sendVideo(targetChatId, media, {
+            caption: post.text,
+            parse_mode: 'Markdown'
+          });
+        }
       } else {
         await ctx.telegram.sendMessage(targetChatId, post.text, {
           parse_mode: 'Markdown'
@@ -1299,7 +1395,7 @@ const adminHandlers = {
   },
 
   showSubscriberStats: async (ctx) => {
-    if (!utils.isAdmin(ctx.from.id)) {
+    if (!utils.isAdminFromCtx(ctx)) {
       return ctx.reply('❌ У вас нет прав доступа');
     }
 
@@ -1565,14 +1661,77 @@ function setupBotHandlers() {
 
 
   // Fallback
+  bot.on(['photo', 'video'], async (ctx) => {
+    // Пропускаем channel_post и edited_channel_post
+    if (ctx.update.channel_post || ctx.update.edited_channel_post) {
+      return;
+    }
+
+    // Проверяем, что это сообщение от пользователя
+    if (!ctx.message || !ctx.from) {
+      return;
+    }
+
+    const userId = ctx.from.id;
+    const state = adminStates.get(userId);
+
+    if (state && state.step === 'waiting_for_media') {
+      await adminHandlers.handleMediaUpload(ctx);
+    }
+  });
   bot.on('text', (ctx) => {
+    // Пропускаем channel_post
+    if (ctx.update.channel_post || ctx.update.edited_channel_post) {
+      return;
+    }
     ctx.reply('Не понимаю команду. Используйте /catalog для просмотра товаров или /help для помощи');
   });
 
+
   // Обработка ошибок
   bot.catch((err, ctx) => {
-    console.error(`Error for ${ctx.updateType}`, err);
-    ctx.reply('Произошла ошибка. Попробуйте позже.');
+    if (ctx.update.channel_post || ctx.update.edited_channel_post) {
+      console.log('Ignoring channel post error:', err.message);
+      return;
+    }
+
+    // Игнорируем ошибки без пользовательского контекста
+    if (!ctx.from) {
+      console.log('Ignoring error without user context:', err.message);
+      return;
+    }
+
+    // Детальный вывод ошибки в консоль
+    console.error('\n' + '='.repeat(60));
+    console.error('🚨 BOT ERROR 🚨');
+    console.error('='.repeat(60));
+    console.error(`Time: ${new Date().toLocaleString('ru-RU')}`);
+    console.error(`Update type: ${ctx.updateType}`);
+    console.error(`User: ${ctx.from.first_name} ${ctx.from.last_name || ''} (@${ctx.from.username || 'нет'}, ID: ${ctx.from.id})`);
+
+    if (ctx.message?.text) {
+      console.error(`Message text: ${ctx.message.text}`);
+    } else if (ctx.update.callback_query?.data) {
+      console.error(`Callback data: ${ctx.update.callback_query.data}`);
+    }
+
+    console.error(`Error: ${err.message}`);
+    console.error('Stack:');
+    console.error(err.stack || 'No stack trace');
+    console.error('='.repeat(60) + '\n');
+
+    // Отправляем сообщение об ошибке только если есть от кого отвечать
+    try {
+      if (ctx.message || ctx.update.callback_query) {
+        const errorText = err.message
+          ? `Ошибка: ${err.message.substring(0, 200)}${err.message.length > 200 ? '...' : ''}`
+          : 'Произошла неизвестная ошибка';
+
+        ctx.reply(`❌ ${errorText}\n\nПопробуйте еще раз или обратитесь к администратору.`);
+      }
+    } catch (replyError) {
+      console.error('Could not send error message to user:', replyError);
+    }
   });
 
 
