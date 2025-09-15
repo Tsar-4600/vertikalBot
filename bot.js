@@ -1763,12 +1763,9 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
   handleLeasingApplication: async (ctx) => {
     try {
       // Разбираем данные из callback_data: leasing_application_<sku>_<monthPay>
-      const parts = ctx.match[0].split('_');
-      const sku = parts[2];
-      const monthPay = parseInt(parts[3]);
 
       const userId = ctx.from.id;
-
+  
       // Получаем состояние с расчетами
       const state = userStates.get(userId);
 
@@ -1776,7 +1773,8 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         await ctx.answerCbQuery('❌ Данные расчета не найдены');
         return;
       }
-
+      const sku = state.sku;
+      const monthPay = state.monthPay;
       const product = productService.findProductBySku(sku);
       if (!product) {
         await ctx.answerCbQuery('❌ Товар не найден');
