@@ -63,6 +63,7 @@ const CONFIG = {
       },
     ]
   },
+  INTEREST_RATE: 0.035,
 
 };
 
@@ -410,6 +411,9 @@ const productService = {
           { text: '🌐 Перейти на сайт', url: product.urlSite },
           { text: '📝 Оставить заявку', callback_data: `application_${product.sku}` }
         ],
+        [
+          { text: '🔄 Рассчитать лизинг', callback_data: `leasing_${product.sku}` }
+        ],
         navigationButtons,
         [
           { text: '↩️ К категориям', callback_data: 'back_to_categories' }
@@ -644,6 +648,196 @@ const catalogHandlers = {
   // Информация о странице
   handlePageInfo: (ctx) => {
     ctx.answerCbQuery('Текущая страница товара');
+  }
+};
+//
+// Обработчики лизингового калькулятора
+//
+const leasingHandlers = {
+  // Константы для расчета
+
+  // Запуск процесса расчета
+  startLeasingCalculation: async (ctx) => {
+    const sku = ctx.match[1];
+    const product = productService.findProductBySku(sku);
+
+    if (!product) {
+      await ctx.answerCbQuery('Товар не найден');
+      return;
+    }
+
+    // Сохраняем состояние пользователя: какой товар считаем и его цену
+    userStates.set(ctx.from.id, {
+      handler: 'leasing', // Помечаем, что пользователь в процессе расчета лизинга
+      sku: sku,
+      productPrice: product.price,
+      productName: product.name,
+      productUrl: product.urlSite,
+      step: 'waiting_down_payment' // Следующий шаг - ждем первоначальный взнос
+    });
+
+    // Спрашиваем у пользователя первоначальный взнос
+    await ctx.reply(
+      `🏦 Рассчитаем лизинг для "${product.name}"\n\n` +
+      `💰 *Стоимость товара:* ${product.price.toLocaleString('ru-RU')} руб.\n\n` +
+      `📥 *Введите первоначальный взнос в рублях:*\n(Например: 100000)`,
+      { parse_mode: 'Markdown' }
+    );
+
+    // Удаляем сообщение с товаром, чтобы не загромождать чат
+    try {
+      await ctx.deleteMessage();
+    } catch (e) {
+      console.log('Не удалось удалить сообщение:', e.message);
+    }
+
+    await ctx.answerCbQuery();
+  },
+
+  // Обработка ввода первоначального взноса
+  handleDownPaymentInput: async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+
+    // Добавьте в начало обеих функций:
+    if (!ctx.message || !ctx.message.text || !ctx.message.text.trim()) {
+      return ctx.reply('Пожалуйста, введите сумму цифрами');
+    }
+    // Проверяем, что пользователь находится в правильном состоянии
+    if (!state || state.handler !== 'leasing' || state.step !== 'waiting_down_payment') {
+      ctx.reply('Пожалуйста, начните расчет лизинга заново, нажав на кнопку в карточке товара.');
+      return;
+    }
+
+    const downPayment = parseInt(ctx.message.text);
+
+    // Валидация ввода
+    if (isNaN(downPayment) || downPayment <= 0) {
+      ctx.reply('❌ Пожалуйста, введите корректную сумму цифрами (например: 100000)');
+      return;
+    }
+
+    if (downPayment >= state.productPrice) {
+      ctx.reply('❌ Первоначальный взнос не может быть больше или равен стоимости товара. Введите сумму меньше.');
+      return;
+    }
+
+    // Сохраняем взнос и переходим к следующему шагу
+    state.downPayment = downPayment;
+    state.step = 'waiting_loan_term'; // Исправлено: должно быть waiting_loan_term
+    userStates.set(userId, state);
+
+    // Спрашиваем срок лизинга
+    ctx.reply(
+      `✅ Первоначальный взнос: *${downPayment.toLocaleString('ru-RU')} руб.*\n\n` +
+      `📅 *Введите срок лизинга в месяцах* (от 12 до 60):\n(Например: 36)`,
+      { parse_mode: 'Markdown' }
+    );
+  },
+
+  // Обработка ввода срока лизинга
+  handleLoanTermInput: async (ctx) => {
+    const userId = ctx.from.id;
+    const state = userStates.get(userId);
+    if (!ctx.message || !ctx.message.text || !ctx.message.text.trim()) {
+      return ctx.reply('Пожалуйста, введите сумму цифрами');
+    }
+
+    if (!state || state.handler !== 'leasing' || state.step !== 'waiting_loan_term') {
+      ctx.reply('Пожалуйста, начните расчет лизинга заново.');
+      return;
+    }
+
+    const loanTerm = parseInt(ctx.message.text);
+
+    // Валидация срока
+    if (isNaN(loanTerm) || loanTerm < 12 || loanTerm > 60) {
+      ctx.reply('❌ Срок лизинга должен быть от 12 до 60 месяцев. Введите корректное значение.');
+      return;
+    }
+
+    // Сохраняем срок и производим расчет
+    state.loanTerm = loanTerm;
+    userStates.set(userId, state);
+
+    // ВЫЗЫВАЕМ ФУНКЦИЮ РАСЧЕТА И ОТПРАВКИ РЕЗУЛЬТАТА
+    await leasingHandlers.calculateAndSendResult(ctx, state);
+  },
+
+  // Функция расчета и показа результата
+  calculateAndSendResult: async (ctx, state) => {
+    const { productPrice, downPayment, loanTerm, productName } = state;
+    const rate = CONFIG.INTEREST_RATE;
+
+    // Расчет ежемесячного платежа
+    const monthPay = Math.round(
+      (productPrice - downPayment) *
+      ((rate * Math.pow(1 + rate, loanTerm)) /
+        (Math.pow(1 + rate, loanTerm) - 1))
+    );
+
+    // Расчет общей переплаты
+    const totalCost = downPayment + loanTerm * monthPay;
+    const overpayment = totalCost - productPrice;
+    const overpaymentPercent = ((overpayment / productPrice) * 100).toFixed(1);
+
+    // Формируем сообщение с результатом
+    const resultMessage = `🏗️ *Расчет лизинга для "${utils.escapeMarkdown(productName)}"*\n\n` +
+      `💰 *Стоимость товара:* ${productPrice.toLocaleString('ru-RU')} руб.\n` +
+      `📥 *Первоначальный взнос:* ${downPayment.toLocaleString('ru-RU')} руб.\n` +
+      `📅 *Срок лизинга:* ${loanTerm} месяцев\n\n` +
+      `📊 *Результаты расчета:*\n` +
+      `• Ежемесячный платеж: *${monthPay.toLocaleString('ru-RU')} руб.*\n` +
+      `• Общая сумма: *${totalCost.toLocaleString('ru-RU')} руб.*\n` +
+      `• Переплата: *${overpayment.toLocaleString('ru-RU')} руб.* (${overpaymentPercent}%)\n\n` +
+      `📞 *Хотите оформить лизинг?* Нажмите кнопку ниже для связи с менеджером!`;
+
+    // Сохраняем состояние
+    state.monthPay = monthPay;
+    state.totalCost = totalCost;
+    userStates.set(ctx.from.id, state);
+
+    // Создаем кнопки
+    const replyMarkup = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(
+          '📩 Отправить заявку менеджеру',
+          `leasing_application_${state.sku}_${monthPay}`
+        )
+      ],
+      [
+        Markup.button.url('🌐 На сайт', state.productUrl),
+        Markup.button.callback(
+          '↩️ Вернуться к товару',
+          `back_to_product_${state.sku}`
+        )
+      ]
+    ]);
+
+    // Отправляем результат
+    await ctx.reply(resultMessage, {
+      parse_mode: 'Markdown',
+      reply_markup: replyMarkup.reply_markup
+    });
+  },
+
+  // Обработка кнопки "Вернуться к товару"
+  handleBackToProduct: async (ctx) => {
+    const sku = ctx.match[1];
+    const product = productService.findProductBySku(sku);
+
+    if (product) {
+      // Используем существующий метод показа товара
+      const category = product.category;
+      // Найдем индекс товара в его категории
+      const productsInCategory = productService.getProductsByCategory(category);
+      const productIndex = productsInCategory.findIndex(p => p.sku === sku);
+
+      if (productIndex !== -1) {
+        await productService.showProduct(ctx, category, productIndex);
+      }
+    }
+    await ctx.answerCbQuery();
   }
 };
 //
@@ -1564,7 +1758,73 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
       console.error('Ошибка:', error);
       await ctx.answerCbQuery('Произошла ошибка');
     }
-  }
+  },
+  // В applicationHandlers добавляем новый метод
+  handleLeasingApplication: async (ctx) => {
+    try {
+      // Разбираем данные из callback_data: leasing_application_<sku>_<monthPay>
+      const parts = ctx.match[0].split('_');
+      const sku = parts[2];
+      const monthPay = parseInt(parts[3]);
+
+      const userId = ctx.from.id;
+
+      // Получаем состояние с расчетами
+      const state = userStates.get(userId);
+
+      if (!state || !state.sku) {
+        await ctx.answerCbQuery('❌ Данные расчета не найдены');
+        return;
+      }
+
+      const product = productService.findProductBySku(sku);
+      if (!product) {
+        await ctx.answerCbQuery('❌ Товар не найден');
+        return;
+      }
+
+      // Сохраняем данные для следующего шага (выбор региона)
+      userStates.set(userId + '_leasing_application', {
+        sku: sku,
+        monthPay: monthPay,
+        productName: product.name,
+        productPrice: product.price,
+        downPayment: state.downPayment,
+        loanTerm: state.loanTerm,
+        totalCost: state.totalCost
+      });
+
+      // Показываем выбор региона
+      await ctx.reply(
+        '📍 Для оформления лизинга выберите ваш регион:',
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('Санкт-Петербург', 'leasing_region_petersburg'),
+          ],
+          [
+            Markup.button.callback('Ростов', 'leasing_region_rostov'),
+            Markup.button.callback('Сочи', 'leasing_region_sochi')
+          ],
+          [
+            Markup.button.callback('Симферополь', 'leasing_region_simferopl'),
+            Markup.button.callback('Екатеринбург', 'leasing_region_ekaterinburg'),
+          ],
+          [
+            Markup.button.callback('Казань', 'leasing_region_kazan'),
+            Markup.button.callback('Москва', 'leasing_region_moscow'),
+          ],
+          [
+            Markup.button.callback('🌍 Другой регион', 'leasing_region_other')
+          ],
+        ])
+      );
+
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error in leasing application:', error);
+      await ctx.answerCbQuery('❌ Ошибка обработки заявки');
+    }
+  },
 };
 
 // Настройка обработчиков бота
@@ -1657,8 +1917,21 @@ function setupBotHandlers() {
   bot.action('back_to_categories', (ctx) => catalogHandlers.handleBackToCategories(ctx));
   bot.action('close_catalog', (ctx) => catalogHandlers.handleCloseCatalog(ctx));
   bot.action('page_info', (ctx) => catalogHandlers.handlePageInfo(ctx));
+  // Лизинг: запуск калькулятора из карточки
+  bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
 
+  // Лизинг: отправить заявку
+  bot.action(/^leasing_application_(.+)_(\d+)$/, (ctx) => {
+    applicationHandlers.handleLeasingApplication(ctx);
+  });
 
+  // Лизинг: выбор региона
+  bot.action(/^leasing_region_(.+)$/, (ctx) => {
+    applicationHandlers.handleLeasingRegionSelection(ctx);
+  });
+
+  // Лизинг: вернуться в карточку товара (кнопка из результатов расчёта)
+  bot.action(/^back_to_product_(.+)$/, (ctx) => leasingHandlers.handleBackToProduct(ctx))
 
   // Fallback
   bot.on(['photo', 'video'], async (ctx) => {
@@ -1679,11 +1952,44 @@ function setupBotHandlers() {
       await adminHandlers.handleMediaUpload(ctx);
     }
   });
-  bot.on('text', (ctx) => {
+  bot.on('text', async (ctx) => {
     // Пропускаем channel_post
     if (ctx.update.channel_post || ctx.update.edited_channel_post) {
       return;
     }
+
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    // Подхватываем машину состояний лизинга - ЭТО ОСНОВНАЯ ОШИБКА
+    const state = userStates.get(userId);
+
+    if (state && state.handler === 'leasing') {
+      if (state.step === 'waiting_down_payment') {
+        return leasingHandlers.handleDownPaymentInput(ctx);
+      }
+      if (state.step === 'waiting_loan_term') {
+        return leasingHandlers.handleLoanTermInput(ctx);
+      }
+    }
+
+    // Проверяем состояния админа (должно быть после проверки лизинга)
+    const adminState = adminStates.get(userId);
+    if (adminState) {
+      if (adminState.step === 'waiting_for_text') {
+        return adminHandlers.handlePostText(ctx);
+      }
+      if (adminState.step === 'waiting_for_broadcast') {
+        return adminHandlers.handleBroadcast(ctx);
+      }
+      if (adminState.step === 'waiting_for_media') {
+        if (ctx.message.text.toLowerCase() === 'нет') {
+          return createTextPost(ctx, adminState.text);
+        }
+      }
+    }
+
+    // Общий фолбэк
     ctx.reply('Не понимаю команду. Используйте /catalog для просмотра товаров или /help для помощи');
   });
 
