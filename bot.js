@@ -841,6 +841,8 @@ const leasingHandlers = {
         parse_mode: 'HTML'
       });
     }
+    console.log('Final callback data:', `leasing_application_${sku}__${monthPay}`);
+    console.log('Length:', Buffer.byteLength(`leasing_application_${sku}__${monthPay}`, 'utf8'));
   },
 
   // Обработка кнопки "Вернуться к товару"
@@ -1784,47 +1786,42 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
   // В applicationHandlers добавляем новый метод
   handleLeasingApplication: async (ctx) => {
     try {
-      // Извлекаем полную строку после 'leasing_application_'
-      const fullData = ctx.match[1];
-      // Разделяем строку по ДВОЙНОМУ подчеркиванию, чтобы получить SKU и monthPay
-      const parts = fullData.split('__');
-      if (parts.length !== 2) {
-        await ctx.answerCbQuery('❌ Неверный формат данных');
-        return;
-      }
-      const sku = parts[0]; // Первая часть - это SKU
-      const monthPayStr = parts[1]; // Вторая часть - это месячный платеж (в виде строки)
-      const monthPay = parseInt(monthPayStr); // Преобразуем в число
+      // Теперь данные уже правильно разделены регулярным выражением
+      const sku = ctx.match[1]; // Первая группа - SKU
+      const monthPay = parseInt(ctx.match[2]); // Вторая группа - месячный платеж
+
+      console.log('Parsed SKU:', sku);
+      console.log('Parsed monthPay:', monthPay);
 
       const product = productService.findProductBySku(sku);
       if (!product) {
         await ctx.answerCbQuery('❌ Товар не найден');
         return;
       }
-      // Получаем состояние с полными данными расчета (для получения downPayment, loanTerm и т.д.)
+
       const userId = ctx.from.id;
       const state = userStates.get(userId);
       if (!state) {
         await ctx.answerCbQuery('❌ Данные расчета не найдены');
         return;
       }
-      // Сохраняем данные для следующего шага (выбор региона)
+
+      // Сохраняем данные для следующего шага
       userStates.set(userId + '_leasing_application', {
         sku: sku,
-        monthPay: monthPay, // Используем распарсенный monthPay
+        monthPay: monthPay,
         productName: product.name,
         productPrice: product.price,
         downPayment: state.downPayment || 0,
         loanTerm: state.loanTerm || 0,
         totalCost: state.totalCost || 0
       });
-      // Показываем выбор региона
+
+      // Показываем выбор региона (остается без изменений)
       await ctx.reply(
         '📍 Для оформления лизинга выберите ваш регион:',
         Markup.inlineKeyboard([
-          [
-            Markup.button.callback('Санкт-Петербург', 'leasing_region_petersburg'),
-          ],
+          [Markup.button.callback('Санкт-Петербург', 'leasing_region_petersburg')],
           [
             Markup.button.callback('Ростов', 'leasing_region_rostov'),
             Markup.button.callback('Сочи', 'leasing_region_sochi')
@@ -2041,7 +2038,8 @@ function setupBotHandlers() {
   bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
 
   // Лизинг: отправить заявку
-  bot.action(/^leasing_application_(.+)$/, (ctx) => {
+  bot.action(/^leasing_application_([^_]+)__(\d+)$/, (ctx) => {
+    // Теперь ctx.match[1] = SKU, ctx.match[2] = monthPay
     applicationHandlers.handleLeasingApplication(ctx);
   });
 
