@@ -815,7 +815,7 @@ const leasingHandlers = {
       [
         Markup.button.callback(
           '📩 Отправить заявку менеджеру',
-          `leasing_application_${utils.sanitizeCallbackData(sku)}__${monthPay}`
+          `lapp_${sku}_${monthPay}`
         )
       ],
       [
@@ -841,8 +841,8 @@ const leasingHandlers = {
         parse_mode: 'HTML'
       });
     }
-    console.log('Final callback data:', `leasing_application_${sku}__${monthPay}`);
-    console.log('Length:', Buffer.byteLength(`leasing_application_${sku}__${monthPay}`, 'utf8'));
+    console.log('Final callback data:', `lapp_${sku}_${monthPay}`);
+    console.log('Length:', Buffer.byteLength(`lapp_${sku}_${monthPay}`, 'utf8'));
   },
 
   // Обработка кнопки "Вернуться к товару"
@@ -1786,18 +1786,19 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
   // В applicationHandlers добавляем новый метод
   handleLeasingApplication: async (ctx) => {
     try {
-      // Теперь данные уже правильно разделены регулярным выражением
-      const sku = ctx.match[1]; // Первая группа - SKU
-      const monthPay = parseInt(ctx.match[2]); // Вторая группа - месячный платеж
+      const callbackData = ctx.match[0];
+      const parts = callbackData.split('_');
 
-      console.log('Parsed SKU:', sku);
-      console.log('Parsed monthPay:', monthPay);
-
-      const product = productService.findProductBySku(sku);
-      if (!product) {
-        await ctx.answerCbQuery('❌ Товар не найден');
+      if (parts.length < 3) {
+        await ctx.answerCbQuery('❌ Неверный формат данных');
         return;
       }
+
+      const sku = parts[1];
+      const monthPayStr = parts[2];
+      const monthPay = parseInt(monthPayStr);
+
+      console.log('Parsed leasing application:', { sku, monthPay, callbackData });
 
       const userId = ctx.from.id;
       const state = userStates.get(userId);
@@ -1806,39 +1807,37 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         return;
       }
 
-      // Сохраняем данные для следующего шага
-      userStates.set(userId + '_leasing_application', {
+      // 🔧 ИСПРАВЛЕНИЕ: Сначала находим товар по SKU
+      const product = productService.findProductBySku(sku);
+      if (!product) {
+        await ctx.answerCbQuery('❌ Товар не найден');
+        return;
+      }
+
+      // Сохраняем только необходимые данные
+      userStates.set(userId + '_leasing_app', {
         sku: sku,
         monthPay: monthPay,
-        productName: product.name,
-        productPrice: product.price,
+        productName: product.name, // Теперь product определен
+        productPrice: product.price, // Теперь product определен
         downPayment: state.downPayment || 0,
-        loanTerm: state.loanTerm || 0,
-        totalCost: state.totalCost || 0
+        loanTerm: state.loanTerm || 0
       });
 
-      // Показываем выбор региона (остается без изменений)
+      // Используем более короткие callback_data для регионов
       await ctx.reply(
         '📍 Для оформления лизинга выберите ваш регион:',
         Markup.inlineKeyboard([
-          [Markup.button.callback('Санкт-Петербург', 'leasing_region_petersburg')],
-          [
-            Markup.button.callback('Ростов', 'leasing_region_rostov'),
-            Markup.button.callback('Сочи', 'leasing_region_sochi')
-          ],
-          [
-            Markup.button.callback('Симферополь', 'leasing_region_simferopl'),
-            Markup.button.callback('Екатеринбург', 'leasing_region_ekaterinburg'),
-          ],
-          [
-            Markup.button.callback('Казань', 'leasing_region_kazan'),
-            Markup.button.callback('Москва', 'leasing_region_moscow'),
-          ],
-          [
-            Markup.button.callback('🌍 Другой регион', 'leasing_region_other')
-          ],
+          [Markup.button.callback('СПб', 'lreg_spb')],
+          [Markup.button.callback('Москва', 'lreg_msk')],
+          [Markup.button.callback('Ростов', 'lreg_rostov')],
+          [Markup.button.callback('Сочи', 'lreg_sochi')],
+          [Markup.button.callback('Екатеринбург', 'lreg_ekb')],
+          [Markup.button.callback('Казань', 'lreg_kazan')],
+          [Markup.button.callback('Другой', 'lreg_other')]
         ])
       );
+
       await ctx.answerCbQuery();
     } catch (error) {
       console.error('Error in leasing application:', error);
@@ -1847,9 +1846,9 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
   },
   handleLeasingRegionSelection: async (ctx) => {
     try {
-      const region = ctx.match[1];
+      const regionCode = ctx.match[1]; // spb, msk, etc.
       const userId = ctx.from.id;
-      const leasingData = userStates.get(userId + '_leasing_application');
+      const leasingData = userStates.get(userId + '_leasing_app');
 
       if (!leasingData) {
         await ctx.answerCbQuery('❌ Данные лизинга не найдены');
@@ -1862,9 +1861,21 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         return;
       }
 
-      userRegions.set(userId, region);
+      // Маппинг коротких кодов на полные названия регионов
+      const regionMap = {
+        'spb': 'petersburg',
+        'msk': 'moscow',
+        'rostov': 'rostov',
+        'sochi': 'sochi',
+        'ekb': 'ekaterinburg',
+        'kazan': 'kazan',
+        'other': 'other'
+      };
 
-      const managerMentions = utils.getManagerMentions(region);
+      const fullRegion = regionMap[regionCode] || 'other';
+      userRegions.set(userId, fullRegion);
+
+      const managerMentions = utils.getManagerMentions(fullRegion);
 
       // Проверяем доступ к чату продаж
       try {
@@ -1879,33 +1890,23 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
       const username = user.username ? `@${user.username}` : 'не указан';
       const firstName = user.first_name || 'не указано';
 
-      // Формируем сообщение с деталями лизинга
+      // Формируем компактное сообщение
       const messageText = `
-<b>🏦 НОВАЯ ЗАЯВКА НА ЛИЗИНГ</b> 
-${managerMentions}
+🏦 ЛИЗИНГ ${managerMentions}
 
-<b>📍 Регион:</b> ${utils.escapeHtml(utils.getRegionName(region))}
+📍 Регион: ${utils.escapeHtml(utils.getRegionName(fullRegion))}
 
-<b>📦 Информация о товаре:</b>
-• Наименование: ${utils.escapeHtml(product.name)}
-• Цена: ${product.price.toLocaleString('ru-RU')} руб.
-• Ссылка на сайте: ${product.urlSite}
+📦 Товар: ${utils.escapeHtml(product.name)}
+💰 Цена: ${product.price.toLocaleString('ru-RU')} руб.
 
-<b>💰 Детали расчета лизинга:</b>
-• Первоначальный взнос: ${leasingData.downPayment.toLocaleString('ru-RU')} руб.
-• Срок лизинга: ${leasingData.loanTerm} месяцев
-• Ежемесячный платеж: ${leasingData.monthPay.toLocaleString('ru-RU')} руб.
-• Общая сумма: ${leasingData.totalCost.toLocaleString('ru-RU')} руб.
+💳 Детали:
+• Первоначальный: ${leasingData.downPayment.toLocaleString('ru-RU')} руб.
+• Срок: ${leasingData.loanTerm} мес.
+• Ежемесячно: ${leasingData.monthPay.toLocaleString('ru-RU')} руб.
 
-<b>👤 Информация о клиенте:</b>
-• Имя: ${utils.escapeHtml(firstName)}
-• Username: ${username}
-
-<b>🔗 Ссылки для связи:</b>
-${username !== 'не указан' ? `• Написать в Telegram: https://t.me/${user.username}` : '• Telegram: недоступен'}
-• Ссылка на товар: ${product.urlSite}
-
-<b>⏰ Время заявки:</b> ${new Date().toLocaleString('ru-RU')}
+👤 Клиент: ${utils.escapeHtml(firstName)} ${username}
+⏰ Время: ${new Date().toLocaleString('ru-RU')}
+🔗 Товар: ${product.urlSite}
 `.trim();
 
       const replyMarkup = {
@@ -1916,7 +1917,7 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
               url: username !== 'не указан' ? `https://t.me/${user.username}` : 'https://t.me/'
             },
             {
-              text: '🌐 Открыть товар на сайте',
+              text: '🌐 Открыть товар',
               url: product.urlSite
             }
           ]
@@ -1932,9 +1933,9 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         }
       );
 
-      userStates.delete(userId + '_leasing_application');
+      userStates.delete(userId + '_leasing_app');
 
-      await ctx.editMessageText('✅ Заявка на лизинг отправлена менеджерам! С вами свяжутся в ближайшее время.');
+      await ctx.editMessageText('✅ Заявка на лизинг отправлена! С вами свяжутся в ближайшее время.');
       await ctx.answerCbQuery();
     } catch (error) {
       console.error('Ошибка при отправке заявки на лизинг:', error);
@@ -2038,13 +2039,11 @@ function setupBotHandlers() {
   bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
 
   // Лизинг: отправить заявку
-  bot.action(/^leasing_application_([^_]+)__(\d+)$/, (ctx) => {
-    // Теперь ctx.match[1] = SKU, ctx.match[2] = monthPay
+  bot.action(/^lapp_([^_]+)_(\d+)$/, (ctx) => {
     applicationHandlers.handleLeasingApplication(ctx);
   });
 
-  // Лизинг: выбор региона
-  bot.action(/^leasing_region_(.+)$/, (ctx) => {
+  bot.action(/^lreg_(.+)$/, (ctx) => {
     applicationHandlers.handleLeasingRegionSelection(ctx);
   });
 
