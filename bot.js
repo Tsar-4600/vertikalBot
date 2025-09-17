@@ -63,7 +63,7 @@ const CONFIG = {
       },
     ]
   },
-  INTEREST_RATE: 0.035,
+  INTEREST_RATE: 0.18,
 
 };
 
@@ -758,7 +758,7 @@ const leasingHandlers = {
 
     const loanTerm = parseInt(ctx.message.text);
 
-    // Валидация срока
+    // Проверка на соответствие диапазону
     if (isNaN(loanTerm) || loanTerm < 12 || loanTerm > 60) {
       ctx.reply('❌ Срок лизинга должен быть от 12 до 60 месяцев. Введите корректное значение.');
       return;
@@ -775,7 +775,7 @@ const leasingHandlers = {
   // Функция расчета и показа результата
   calculateAndSendResult: async (ctx, state) => {
     const { productPrice, downPayment, loanTerm, productName, sku } = state;
-    const rate = CONFIG.INTEREST_RATE;
+    const rate = CONFIG.INTEREST_RATE / 12;
 
     // Расчет ежемесячного платежа
     const monthPay = Math.round(
@@ -789,33 +789,30 @@ const leasingHandlers = {
     console.log('MonthPay:', monthPay, 'Type:', typeof monthPay);
     console.log('Callback data would be:', `leasing_application_${sku}_${monthPay}`);
 
-    // Расчет общей переплаты
+    // Расчет общей суммы (без переплаты)
     const totalCost = downPayment + loanTerm * monthPay;
-    const overpayment = totalCost - productPrice;
-    const overpaymentPercent = ((overpayment / productPrice) * 100).toFixed(1);
 
     // Сохраняем состояние с расчетами
     state.monthPay = monthPay;
     state.totalCost = totalCost;
     userStates.set(ctx.from.id, state);
 
-    // Формируем сообщение с результатом в HTML формате
+    // Формируем сообщение с результатом в HTML формате (БЕЗ ПЕРЕПЛАТЫ)
     const resultMessage = `<b>🏗️ Расчет лизинга для "${utils.escapeHtml(productName)}"</b>\n\n` +
       `💰 <b>Стоимость товара:</b> ${productPrice.toLocaleString('ru-RU')} руб.\n` +
       `📥 <b>Первоначальный взнос:</b> ${downPayment.toLocaleString('ru-RU')} руб.\n` +
       `📅 <b>Срок лизинга:</b> ${loanTerm} месяцев\n\n` +
       `<b>📊 Результаты расчета:</b>\n` +
       `• Ежемесячный платеж: <b>${monthPay.toLocaleString('ru-RU')} руб.</b>\n` +
-      `• Общая сумма: <b>${totalCost.toLocaleString('ru-RU')} руб.</b>\n` +
-      `• Переплата: <b>${overpayment.toLocaleString('ru-RU')} руб.</b> (${overpaymentPercent}%)\n\n` +
+      `• Общая сумма: <b>${totalCost.toLocaleString('ru-RU')} руб.</b>\n\n` + // ← Удалена строка с переплатой
       `📞 <b>Хотите оформить лизинг?</b> Нажмите кнопку ниже для связи с менеджером!`;
 
-    // Создаем кнопки - УПРОЩАЕМ callback_data
+    // Создаем кнопки
     const replyMarkup = Markup.inlineKeyboard([
       [
         Markup.button.callback(
           '📩 Отправить заявку менеджеру',
-          `lapp_${sku}_${monthPay}`
+          `lapp_${sku}|${monthPay}`
         )
       ],
       [
@@ -835,14 +832,13 @@ const leasingHandlers = {
       });
     } catch (error) {
       console.error('Ошибка при отправке результата лизинга:', error);
-
       // Fallback - отправляем без кнопок если есть ошибка
       await ctx.reply(resultMessage + '\n\nИспользуйте команду /catalog чтобы вернуться к товарам', {
         parse_mode: 'HTML'
       });
     }
-    console.log('Final callback data:', `lapp_${sku}_${monthPay}`);
-    console.log('Length:', Buffer.byteLength(`lapp_${sku}_${monthPay}`, 'utf8'));
+    console.log('Final callback data:', `lapp_${sku}|${monthPay}`);
+    console.log('Length:', Buffer.byteLength(`lapp_${sku}|${monthPay}`, 'utf8'));
   },
 
   // Обработка кнопки "Вернуться к товару"
@@ -1784,47 +1780,35 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
     }
   },
   // В applicationHandlers добавляем новый метод
-  handleLeasingApplication: async (ctx) => {
+  handleLeasingApplication: async (ctx, sku, monthPay) => {
     try {
-      const callbackData = ctx.match[0];
-      const parts = callbackData.split('_');
-
-      if (parts.length < 3) {
-        await ctx.answerCbQuery('❌ Неверный формат данных');
-        return;
-      }
-
-      const sku = parts[1];
-      const monthPayStr = parts[2];
-      const monthPay = parseInt(monthPayStr);
-
-      console.log('Parsed leasing application:', { sku, monthPay, callbackData });
+      console.log('Parsed leasing application:', { sku, monthPay });
 
       const userId = ctx.from.id;
       const state = userStates.get(userId);
+
       if (!state) {
-        await ctx.answerCbQuery('❌ Данные расчета не найдены');
+        await ctx.answerCbQuery('❌ Данные расчета не найдены. Начните расчет заново.');
         return;
       }
 
-      // 🔧 ИСПРАВЛЕНИЕ: Сначала находим товар по SKU
       const product = productService.findProductBySku(sku);
       if (!product) {
         await ctx.answerCbQuery('❌ Товар не найден');
         return;
       }
 
-      // Сохраняем только необходимые данные
+      // Сохраняем данные заявки
       userStates.set(userId + '_leasing_app', {
         sku: sku,
         monthPay: monthPay,
-        productName: product.name, // Теперь product определен
-        productPrice: product.price, // Теперь product определен
+        productName: product.name,
+        productPrice: product.price,
         downPayment: state.downPayment || 0,
         loanTerm: state.loanTerm || 0
       });
 
-      // Используем более короткие callback_data для регионов
+      // Показываем выбор региона
       await ctx.reply(
         '📍 Для оформления лизинга выберите ваш регион:',
         Markup.inlineKeyboard([
@@ -2039,8 +2023,27 @@ function setupBotHandlers() {
   bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
 
   // Лизинг: отправить заявку
-  bot.action(/^lapp_([^_]+)_(\d+)$/, (ctx) => {
-    applicationHandlers.handleLeasingApplication(ctx);
+  bot.action(/^lapp_(.+)$/, (ctx) => {
+    // Разделяем строку ПОСЛЕ префикса 'lapp_' по ПЕРВОМУ символу '|'
+    const fullData = ctx.match[1]; // Например: "AUT-PWT-URA-ACPT-10|123456"
+    const separatorIndex = fullData.lastIndexOf('|'); // Ищем последний '|', на случай если в sku есть '|'
+
+    if (separatorIndex === -1) {
+      console.error('Invalid lapp data format (no separator):', fullData);
+      return ctx.answerCbQuery('❌ Ошибка в данных заявки');
+    }
+
+    const sku = fullData.substring(0, separatorIndex);
+    const monthPayStr = fullData.substring(separatorIndex + 1);
+    const monthPay = parseInt(monthPayStr);
+
+    if (!sku || isNaN(monthPay) || monthPay <= 0) {
+      console.error('Invalid leasing application data:', { sku, monthPay });
+      return ctx.answerCbQuery('❌ Неверные данные заявки');
+    }
+
+    // Передаем данные напрямую в обработчик, не изменяя ctx.match
+    applicationHandlers.handleLeasingApplication(ctx, sku, monthPay);
   });
 
   bot.action(/^lreg_(.+)$/, (ctx) => {
