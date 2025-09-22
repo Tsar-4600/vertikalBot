@@ -63,7 +63,7 @@ const CONFIG = {
       },
     ]
   },
-  INTEREST_RATE: 0.18,
+  INTEREST_RATE: 0.205,
 
 };
 
