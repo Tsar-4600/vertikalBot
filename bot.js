@@ -175,6 +175,81 @@ const utils = {
       .substring(0, 64); // Ограничиваем длину
   }
 };
+// Добавим регулярную очистку состояний
+const stateManager = {
+    cleanupStates: () => {
+        const now = Date.now();
+        const maxAge = 30 * 60 * 1000; // 30 минут
+        
+        // Очистка userStates
+        for (const [userId, state] of userStates.entries()) {
+            if (state && state.timestamp && (now - state.timestamp > maxAge)) {
+                userStates.delete(userId);
+                console.log(`Cleaned up state for user ${userId}`);
+            }
+        }
+        
+        // Очистка adminStates
+        for (const [userId, state] of adminStates.entries()) {
+            if (state && state.timestamp && (now - state.timestamp > maxAge)) {
+                adminStates.delete(userId);
+                console.log(`Cleaned up admin state for user ${userId}`);
+            }
+        }
+        
+        // Очистка временных заявок (исправлено)
+        for (const [key, value] of userStates.entries()) {
+            const keyStr = key.toString();
+            if ((keyStr.includes('_application') || keyStr.includes('_leasing_app')) && 
+                value && value.timestamp && (now - value.timestamp > maxAge)) {
+                userStates.delete(key);
+                console.log(`Cleaned up application state for key ${keyStr}`);
+            }
+        }
+    },
+    
+    getState: (userId) => {
+        const state = userStates.get(userId);
+        if (state) {
+            state.timestamp = Date.now();
+        }
+        return state;
+    },
+    
+    setState: (userId, state) => {
+        state.timestamp = Date.now();
+        userStates.set(userId, state);
+    },
+    
+    // Дополнительные полезные методы
+    deleteState: (userId) => {
+        userStates.delete(userId);
+    },
+    
+    hasState: (userId) => {
+        return userStates.has(userId);
+    },
+    
+    // Для админских состояний
+    getAdminState: (userId) => {
+        const state = adminStates.get(userId);
+        if (state) {
+            state.timestamp = Date.now();
+        }
+        return state;
+    },
+    
+    setAdminState: (userId, state) => {
+        state.timestamp = Date.now();
+        adminStates.set(userId, state);
+    }
+};
+
+//
+//// Запускаем очистку каждые 10 минут stateManager'a
+//
+setInterval(() => stateManager.cleanupStates(), 10 * 60 * 1000);
+
 
 // Добавляем middleware для обработки состояний
 bot.use(async (ctx, next) => {
@@ -705,7 +780,7 @@ const leasingHandlers = {
   // Обработка ввода первоначального взноса
   handleDownPaymentInput: async (ctx) => {
     const userId = ctx.from.id;
-    const state = userStates.get(userId);
+    const state = stateManager.getState(userId);
 
     // Добавьте в начало обеих функций:
     if (!ctx.message || !ctx.message.text || !ctx.message.text.trim()) {
@@ -733,7 +808,7 @@ const leasingHandlers = {
     // Сохраняем взнос и переходим к следующему шагу
     state.downPayment = downPayment;
     state.step = 'waiting_loan_term'; // Исправлено: должно быть waiting_loan_term
-    userStates.set(userId, state);
+    stateManager.setState(userId, state);
 
     // Спрашиваем срок лизинга
     ctx.reply(
@@ -746,7 +821,7 @@ const leasingHandlers = {
   // Обработка ввода срока лизинга
   handleLoanTermInput: async (ctx) => {
     const userId = ctx.from.id;
-    const state = userStates.get(userId);
+    const state = stateManager.getState(userId);
     if (!ctx.message || !ctx.message.text || !ctx.message.text.trim()) {
       return ctx.reply('Пожалуйста, введите сумму цифрами');
     }
@@ -766,7 +841,7 @@ const leasingHandlers = {
 
     // Сохраняем срок и производим расчет
     state.loanTerm = loanTerm;
-    userStates.set(userId, state);
+    stateManager.setState(userId, state);
 
     // ВЫЗЫВАЕМ ФУНКЦИЮ РАСЧЕТА И ОТПРАВКИ РЕЗУЛЬТАТА
     await leasingHandlers.calculateAndSendResult(ctx, state);
@@ -1785,7 +1860,7 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
       console.log('Parsed leasing application:', { sku, monthPay });
 
       const userId = ctx.from.id;
-      const state = userStates.get(userId);
+      const state = stateManager.getState(userId);
 
       if (!state) {
         await ctx.answerCbQuery('❌ Данные расчета не найдены. Начните расчет заново.');
@@ -2082,7 +2157,7 @@ function setupBotHandlers() {
     if (!userId) return;
 
     // Проверяем состояние лизинга ПЕРВЫМ делом
-    const state = userStates.get(userId);
+    const state = stateManager.getState(userId);
     if (state && state.handler === 'leasing') {
       if (state.step === 'waiting_down_payment') {
         return leasingHandlers.handleDownPaymentInput(ctx);
