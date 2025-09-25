@@ -173,76 +173,145 @@ const utils = {
     return text.toString()
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .substring(0, 64); // Ограничиваем длину
+  },
+  // Генератор уникальных ID для callback_data
+  generateCallbackId: (prefix, data, maxLength = 60) => {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 5);
+    const baseId = `${prefix}_${timestamp}_${random}`;
+    const dataStr = JSON.stringify(data);
+    // ВСЕГДА используем хеш — безопасно и коротко
+    const hash = require('crypto').createHash('md5').update(dataStr).digest('hex').substr(0, 8);
+    const fullId = `${baseId}_${hash}`;
+    // Убедимся, что не превышает 64 символа
+    return fullId.substring(0, 64);
+  },
+
+  // Кэш для хранения данных callback
+  callbackCache: new Map(),
+
+  // Сохранить данные в кэше
+  storeCallbackData: (callbackId, data, ttl = 300000) => { // 5 минут TTL
+    utils.callbackCache.set(callbackId, {
+      data: data,
+      expires: Date.now() + ttl
+    });
+
+    // Логирование для отладки
+    console.log(`[CACHE] Stored callback ${callbackId}:`, {
+      sku: data.sku,
+      monthPay: data.monthPay,
+      size: Buffer.byteLength(JSON.stringify(data))
+    });
+  },
+
+  // Получить данные из кэша
+  getCallbackData: (callbackId) => {
+    const item = utils.callbackCache.get(callbackId);
+    if (!item) {
+      console.log(`[CACHE] Callback ${callbackId} not found`);
+      return null;
+    }
+
+    if (Date.now() > item.expires) {
+      utils.callbackCache.delete(callbackId);
+      console.log(`[CACHE] Callback ${callbackId} expired`);
+      return null;
+    }
+
+    console.log(`[CACHE] Retrieved callback ${callbackId}:`, {
+      sku: item.data.sku,
+      monthPay: item.data.monthPay
+    });
+    return item.data;
+  },
+
+  // Очистка просроченных данных
+  cleanupCallbackCache: () => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, value] of utils.callbackCache.entries()) {
+      if (now > value.expires) {
+        utils.callbackCache.delete(key);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[CACHE] Cleaned up ${cleaned} expired entries`);
+    }
   }
 };
+// Запускаем очистку кэша каждые 10 минут 
+setInterval(() => utils.cleanupCallbackCache(), 600000);
+
 // Добавим регулярную очистку состояний
 const stateManager = {
-    cleanupStates: () => {
-        const now = Date.now();
-        const maxAge = 30 * 60 * 1000; // 30 минут
-        
-        // Очистка userStates
-        for (const [userId, state] of userStates.entries()) {
-            if (state && state.timestamp && (now - state.timestamp > maxAge)) {
-                userStates.delete(userId);
-                console.log(`Cleaned up state for user ${userId}`);
-            }
-        }
-        
-        // Очистка adminStates
-        for (const [userId, state] of adminStates.entries()) {
-            if (state && state.timestamp && (now - state.timestamp > maxAge)) {
-                adminStates.delete(userId);
-                console.log(`Cleaned up admin state for user ${userId}`);
-            }
-        }
-        
-        // Очистка временных заявок (исправлено)
-        for (const [key, value] of userStates.entries()) {
-            const keyStr = key.toString();
-            if ((keyStr.includes('_application') || keyStr.includes('_leasing_app')) && 
-                value && value.timestamp && (now - value.timestamp > maxAge)) {
-                userStates.delete(key);
-                console.log(`Cleaned up application state for key ${keyStr}`);
-            }
-        }
-    },
-    
-    getState: (userId) => {
-        const state = userStates.get(userId);
-        if (state) {
-            state.timestamp = Date.now();
-        }
-        return state;
-    },
-    
-    setState: (userId, state) => {
-        state.timestamp = Date.now();
-        userStates.set(userId, state);
-    },
-    
-    // Дополнительные полезные методы
-    deleteState: (userId) => {
+  cleanupStates: () => {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 минут
+
+    // Очистка userStates
+    for (const [userId, state] of userStates.entries()) {
+      if (state && state.timestamp && (now - state.timestamp > maxAge)) {
         userStates.delete(userId);
-    },
-    
-    hasState: (userId) => {
-        return userStates.has(userId);
-    },
-    
-    // Для админских состояний
-    getAdminState: (userId) => {
-        const state = adminStates.get(userId);
-        if (state) {
-            state.timestamp = Date.now();
-        }
-        return state;
-    },
-    
-    setAdminState: (userId, state) => {
-        state.timestamp = Date.now();
-        adminStates.set(userId, state);
+        console.log(`Cleaned up state for user ${userId}`);
+      }
     }
+
+    // Очистка adminStates
+    for (const [userId, state] of adminStates.entries()) {
+      if (state && state.timestamp && (now - state.timestamp > maxAge)) {
+        adminStates.delete(userId);
+        console.log(`Cleaned up admin state for user ${userId}`);
+      }
+    }
+
+    // Очистка временных заявок (исправлено)
+    for (const [key, value] of userStates.entries()) {
+      const keyStr = key.toString();
+      if ((keyStr.includes('_application') || keyStr.includes('_leasing_app')) &&
+        value && value.timestamp && (now - value.timestamp > maxAge)) {
+        userStates.delete(key);
+        console.log(`Cleaned up application state for key ${keyStr}`);
+      }
+    }
+  },
+
+  getState: (userId) => {
+    const state = userStates.get(userId);
+    if (state) {
+      state.timestamp = Date.now();
+    }
+    return state;
+  },
+
+  setState: (userId, state) => {
+    state.timestamp = Date.now();
+    userStates.set(userId, state);
+  },
+
+  // Дополнительные полезные методы
+  deleteState: (userId) => {
+    userStates.delete(userId);
+  },
+
+  hasState: (userId) => {
+    return userStates.has(userId);
+  },
+
+  // Для админских состояний
+  getAdminState: (userId) => {
+    const state = adminStates.get(userId);
+    if (state) {
+      state.timestamp = Date.now();
+    }
+    return state;
+  },
+
+  setAdminState: (userId, state) => {
+    state.timestamp = Date.now();
+    adminStates.set(userId, state);
+  }
 };
 
 //
@@ -613,7 +682,10 @@ const productService = {
   },
 
   findProductBySku(sku) {
-    return catalogProductsData.products.find(p => p.sku === sku);
+    console.log('[DEBUG] Поиск SKU:', JSON.stringify(sku));
+    const found = catalogProductsData.products.find(p => p.sku === sku);
+    console.log('[DEBUG] Найден:', !!found);
+    return found;
   }
 };
 
@@ -849,90 +921,106 @@ const leasingHandlers = {
 
   // Функция расчета и показа результата
   calculateAndSendResult: async (ctx, state) => {
-    const { productPrice, downPayment, loanTerm, productName, sku } = state;
+    const { productPrice, downPayment, loanTerm, productName, sku, productUrl } = state;
     const rate = CONFIG.INTEREST_RATE / 12;
 
-    // Расчет ежемесячного платежа
     const monthPay = Math.round(
       (productPrice - downPayment) *
       ((rate * Math.pow(1 + rate, loanTerm)) /
         (Math.pow(1 + rate, loanTerm) - 1))
     );
 
-    // Логирование для отладки
-    console.log('SKU:', sku, 'Type:', typeof sku);
-    console.log('MonthPay:', monthPay, 'Type:', typeof monthPay);
-    console.log('Callback data would be:', `leasing_application_${sku}_${monthPay}`);
+    // Генерируем callbackId — НЕ включаем product, только данные из state
+    const callbackId = utils.generateCallbackId('lapp', { // СТАЛО 'lapp'
+      sku: sku,
+      monthPay: monthPay,
+      productPrice: state.productPrice,
+      downPayment: state.downPayment,
+      loanTerm: state.loanTerm
+    });
 
-    // Расчет общей суммы (без переплаты)
+    // Сохраняем в кэш — только то, что есть в state
+    utils.storeCallbackData(callbackId, {
+      sku: sku,
+      monthPay: monthPay,
+      productName: state.productName,      // ✅
+      productPrice: state.productPrice,   // ✅
+      downPayment: state.downPayment,
+      loanTerm: state.loanTerm,
+      productUrl: state.productUrl        // ✅
+    });
+
     const totalCost = downPayment + loanTerm * monthPay;
-
-    // Сохраняем состояние с расчетами
     state.monthPay = monthPay;
     state.totalCost = totalCost;
     userStates.set(ctx.from.id, state);
 
-    // Формируем сообщение с результатом в HTML формате (БЕЗ ПЕРЕПЛАТЫ)
-    const resultMessage = `<b>🏗️ Расчет лизинга для "${utils.escapeHtml(productName)}"</b>\n\n` +
-      `💰 <b>Стоимость товара:</b> ${productPrice.toLocaleString('ru-RU')} руб.\n` +
-      `📥 <b>Первоначальный взнос:</b> ${downPayment.toLocaleString('ru-RU')} руб.\n` +
-      `📅 <b>Срок лизинга:</b> ${loanTerm} месяцев\n\n` +
-      `<b>📊 Результаты расчета:</b>\n` +
-      `• Ежемесячный платеж: <b>${monthPay.toLocaleString('ru-RU')} руб.</b>\n` +
-      `• Общая сумма: <b>${totalCost.toLocaleString('ru-RU')} руб.</b>\n\n` + // ← Удалена строка с переплатой
-      `📞 <b>Хотите оформить лизинг?</b> Нажмите кнопку ниже для связи с менеджером!`;
+    const resultMessage = `<b>🏗️ Расчет лизинга для "${utils.escapeHtml(productName)}"</b>
+💰 <b>Стоимость товара:</b> ${productPrice.toLocaleString('ru-RU')} руб.
+📥 <b>Первоначальный взнос:</b> ${downPayment.toLocaleString('ru-RU')} руб.
+📅 <b>Срок лизинга:</b> ${loanTerm} месяцев
+<b>📊 Результаты расчета:</b>
+• Ежемесячный платеж: <b>${monthPay.toLocaleString('ru-RU')} руб.</b>
+• Общая сумма: <b>${totalCost.toLocaleString('ru-RU')} руб.</b>
+📞 <b>Хотите оформить лизинг?</b> Нажмите кнопку ниже для связи с менеджером!`;
 
-    // Создаем кнопки
     const replyMarkup = Markup.inlineKeyboard([
+      [Markup.button.callback('📩 Отправить заявку менеджеру', callbackId)],
       [
-        Markup.button.callback(
-          '📩 Отправить заявку менеджеру',
-          `lapp_${sku}|${monthPay}`
-        )
-      ],
-      [
-        Markup.button.url('🌐 На сайт', state.productUrl),
-        Markup.button.callback(
-          '↩️ Вернуться к товару',
-          `back_to_product_${sku}`
-        )
+        Markup.button.url('🌐 На сайт', productUrl),
+        Markup.button.callback('↩️ Вернуться к товару', `back_to_product_${sku}`)
       ]
     ]);
 
     try {
-      // Отправляем результат с HTML разметкой
       await ctx.reply(resultMessage, {
         parse_mode: 'HTML',
         reply_markup: replyMarkup.reply_markup
       });
+      console.log(`[LEASING] Generated callback ${callbackId} for SKU: ${sku}`);
     } catch (error) {
       console.error('Ошибка при отправке результата лизинга:', error);
-      // Fallback - отправляем без кнопок если есть ошибка
-      await ctx.reply(resultMessage + '\n\nИспользуйте команду /catalog чтобы вернуться к товарам', {
+      await ctx.reply(resultMessage + '\nИспользуйте команду /catalog чтобы вернуться к товарам', {
         parse_mode: 'HTML'
       });
     }
-    console.log('Final callback data:', `lapp_${sku}|${monthPay}`);
-    console.log('Length:', Buffer.byteLength(`lapp_${sku}|${monthPay}`, 'utf8'));
   },
 
   // Обработка кнопки "Вернуться к товару"
+  // В leasingHandlers.handleBackToProduct - улучшаем обработку:
   handleBackToProduct: async (ctx) => {
-    const sku = ctx.match[1];
-    const product = productService.findProductBySku(sku);
+    try {
+      const sku = ctx.match[1];
+      const product = productService.findProductBySku(sku);
 
-    if (product) {
-      // Используем существующий метод показа товара
+      if (!product) {
+        await ctx.answerCbQuery('❌ Товар не найден');
+        return;
+      }
+
       const category = product.category;
-      // Найдем индекс товара в его категории
       const productsInCategory = productService.getProductsByCategory(category);
       const productIndex = productsInCategory.findIndex(p => p.sku === sku);
 
-      if (productIndex !== -1) {
-        await productService.showProduct(ctx, category, productIndex);
+      if (productIndex === -1) {
+        await ctx.answerCbQuery('❌ Товар не найден в каталоге');
+        return;
       }
+
+      // Удаляем сообщение с расчетом лизинга
+      try {
+        await ctx.deleteMessage();
+      } catch (e) {
+        console.log('Не удалось удалить сообщение:', e.message);
+      }
+
+      await productService.showProduct(ctx, category, productIndex);
+      await ctx.answerCbQuery();
+
+    } catch (error) {
+      console.error('Error in handleBackToProduct:', error);
+      await ctx.answerCbQuery('❌ Ошибка возврата к товару');
     }
-    await ctx.answerCbQuery();
   }
 };
 //
@@ -1857,18 +1945,20 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
   // В applicationHandlers добавляем новый метод
   handleLeasingApplication: async (ctx, sku, monthPay) => {
     try {
-      console.log('Parsed leasing application:', { sku, monthPay });
+      console.log('[APPLICATION] Starting leasing app for SKU:', sku, 'MonthPay:', monthPay);
 
       const userId = ctx.from.id;
       const state = stateManager.getState(userId);
 
       if (!state) {
+        console.log('[APPLICATION] No state found for user:', userId);
         await ctx.answerCbQuery('❌ Данные расчета не найдены. Начните расчет заново.');
         return;
       }
 
       const product = productService.findProductBySku(sku);
       if (!product) {
+        console.log('[APPLICATION] Product not found for SKU:', sku);
         await ctx.answerCbQuery('❌ Товар не найден');
         return;
       }
@@ -1883,7 +1973,8 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         loanTerm: state.loanTerm || 0
       });
 
-      // Показываем выбор региона
+      console.log('[APPLICATION] Showing region selection for user:', userId);
+
       await ctx.reply(
         '📍 Для оформления лизинга выберите ваш регион:',
         Markup.inlineKeyboard([
@@ -2098,36 +2189,29 @@ function setupBotHandlers() {
   bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
 
   // Лизинг: отправить заявку
-  bot.action(/^lapp_(.+)$/, (ctx) => {
-    // Разделяем строку ПОСЛЕ префикса 'lapp_' по ПЕРВОМУ символу '|'
-    const fullData = ctx.match[1]; // Например: "AUT-PWT-URA-ACPT-10|123456"
-    const separatorIndex = fullData.lastIndexOf('|'); // Ищем последний '|', на случай если в sku есть '|'
-
-    if (separatorIndex === -1) {
-      console.error('Invalid lapp data format (no separator):', fullData);
-      return ctx.answerCbQuery('❌ Ошибка в данных заявки');
+  bot.action(/^lapp_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9_]+)?$/, async (ctx) => {
+    try {
+      const callbackId = ctx.match[0];
+      const data = utils.getCallbackData(callbackId);
+      if (!data) {
+        return ctx.answerCbQuery('❌ Данные устарели. Начните расчет заново.');
+      }
+      console.log(`[LEASING APP] Processing for SKU: ${data.sku}`);
+      await applicationHandlers.handleLeasingApplication(ctx, data.sku, data.monthPay);
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error in lapp handler:', error);
+      await ctx.answerCbQuery('❌ Ошибка обработки');
     }
-
-    const sku = fullData.substring(0, separatorIndex);
-    const monthPayStr = fullData.substring(separatorIndex + 1);
-    const monthPay = parseInt(monthPayStr);
-
-    if (!sku || isNaN(monthPay) || monthPay <= 0) {
-      console.error('Invalid leasing application data:', { sku, monthPay });
-      return ctx.answerCbQuery('❌ Неверные данные заявки');
-    }
-
-    // Передаем данные напрямую в обработчик, не изменяя ctx.match
-    applicationHandlers.handleLeasingApplication(ctx, sku, monthPay);
   });
-
   bot.action(/^lreg_(.+)$/, (ctx) => {
     applicationHandlers.handleLeasingRegionSelection(ctx);
   });
 
   // Лизинг: вернуться в карточку товара (кнопка из результатов расчёта)
   bot.action(/^back_to_product_(.+)$/, (ctx) => leasingHandlers.handleBackToProduct(ctx))
-
+  // Обработчик для callback-ключей лизинга
+ 
   // Fallback
   bot.on(['photo', 'video'], async (ctx) => {
     // Пропускаем channel_post и edited_channel_post

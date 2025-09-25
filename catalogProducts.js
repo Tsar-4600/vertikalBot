@@ -263,7 +263,15 @@ const catalogProductsData = {
       "price": 32028000,
       "urlSite": "https://gkvertikal.ru/lokomobil-mart-1m-na-shassi-ural-next-4320-6952-72-6h6/",
       "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/osobogo-naznacheniya/LCM-URA-MART-1M--4320-6952-72/front-570x570.png"
-    }
+    },
+    {
+      "sku": "AUT-VCT-URA-MV10OD--4320-6951-72jfgnhgfphgfhpngfihoihfhhidhgjfhignhhkfghmgfhkigfphmnsrjmnhruthnmtsrhushnunhtuhntsruhnusthusnhtu-nr-uh-h=srsuhjmr-jgfikhmjr9j8h9rhjmioyjhyodig[khojhnohjm-y9hjhifghkmfgphmhnptymhsrthnrtphnsujthn",
+      "name": "Автоцистерна вакуумная коммунальная МВ-10-ОД 10м3 на шасси Урал 4320-6951-72",
+      "category": "ТЕСТОВЫЙ ПРОДУКТ",
+      "price": 9090000,
+      "urlSite": "https://gkvertikal.ru/avtocisterna-vakuumnaya-kommunalnaya-mv-10-od-10m3-na-shassi-ural-4320-6951-72/ ",
+      "urlSiteImage": "https://gkvertikal.ru/image/cache/catalog/avtotransport/avtotsisterna/MV-vaccum/1706ae99-fec9-4f4e-9c8f-d6073a35fc5f-570x570.png "
+    },
   ]
 };
 
