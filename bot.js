@@ -520,6 +520,19 @@ const productService = {
 
     const product = products[index];
 
+    // Сгенерируем короткие ID для кнопок карточки
+    const leasingStartId = utils.generateCallbackId('lease', { sku: product.sku });
+    utils.storeCallbackData(leasingStartId, { sku: product.sku }, 10 * 60 * 1000); // 10 минут
+
+    const appStartId = utils.generateCallbackId('app', { sku: product.sku, type: 'product_application' });
+    utils.storeCallbackData(appStartId, {
+      sku: product.sku,
+      productName: product.name,
+      productPrice: product.price,
+      productUrl: product.urlSite,
+      type: 'product_application'
+    }, 10 * 60 * 1000); // 10 минут
+
     // Сохраняем состояние пользователя
     userStates.set(ctx.from.id, {
       category: category,
@@ -561,10 +574,12 @@ const productService = {
       inline_keyboard: [
         [
           { text: '🌐 Перейти на сайт', url: product.urlSite },
-          { text: '📝 Оставить заявку', callback_data: `application_${product.sku}` }
+          // было: callback_data: `app_${utils.sanitizeCallbackData(product.sku)}`
+          { text: '📝 Оставить заявку', callback_data: appStartId }
         ],
         [
-          { text: '🔄 Рассчитать лизинг', callback_data: `leasing_${product.sku}` }
+          // было: callback_data: `leasing_${product.sku}`
+          { text: '🔄 Рассчитать лизинг', callback_data: leasingStartId }
         ],
         navigationButtons,
         [
@@ -955,6 +970,9 @@ const leasingHandlers = {
     state.totalCost = totalCost;
     userStates.set(ctx.from.id, state);
 
+    const backToProductId = utils.generateCallbackId('btp', { sku });
+    utils.storeCallbackData(backToProductId, { sku }, 10 * 60 * 1000); // 10 минут
+
     const resultMessage = `<b>🏗️ Расчет лизинга для "${utils.escapeHtml(productName)}"</b>
 💰 <b>Стоимость товара:</b> ${productPrice.toLocaleString('ru-RU')} руб.
 📥 <b>Первоначальный взнос:</b> ${downPayment.toLocaleString('ru-RU')} руб.
@@ -968,7 +986,7 @@ const leasingHandlers = {
       [Markup.button.callback('📩 Отправить заявку менеджеру', callbackId)],
       [
         Markup.button.url('🌐 На сайт', productUrl),
-        Markup.button.callback('↩️ Вернуться к товару', `back_to_product_${sku}`)
+        Markup.button.callback('↩️ Вернуться к товару', backToProductId)
       ]
     ]);
 
@@ -1818,31 +1836,35 @@ const applicationHandlers = {
         return;
       }
 
+      // Генерируем короткий callback ID вместо длинного SKU
+      const callbackId = utils.generateCallbackId('app', {
+        sku: sku,
+        type: 'product_application'
+      });
+
+      // Сохраняем в кэш
+      utils.storeCallbackData(callbackId, {
+        sku: sku,
+        productName: product.name,
+        productPrice: product.price,
+        productUrl: product.urlSite,
+        type: 'product_application'
+      });
+
+      // Сохраняем в состоянии для совместимости
       userStates.set(ctx.from.id + '_application', sku);
 
       await ctx.reply(
         '📍 Выберите ваш регион:',
         Markup.inlineKeyboard([
-          [
-            Markup.button.callback('Санкт-Петербург', 'region_petersburg'),
-
-          ],
-          [
-            Markup.button.callback('Ростов', 'region_rostov'),
-            Markup.button.callback('Сочи', 'region_sochi')
-          ],
-          [
-            Markup.button.callback('Симферополь', 'region_simferopl'),
-            Markup.button.callback('Екатеринбург', 'region_ekaterinburg'),
-          ],
-          [
-            Markup.button.callback('Казань', 'region_kazan'),
-            Markup.button.callback('Москва', 'region_moscow'),
-
-          ],
-          [
-            Markup.button.callback('🌍 Другой регион', 'region_other')
-          ],
+          [Markup.button.callback('Санкт-Петербург', callbackId + '_petersburg')],
+          [Markup.button.callback('Ростов', callbackId + '_rostov')],
+          [Markup.button.callback('Сочи', callbackId + '_sochi')],
+          [Markup.button.callback('Симферополь', callbackId + '_simferopl')],
+          [Markup.button.callback('Екатеринбург', callbackId + '_ekaterinburg')],
+          [Markup.button.callback('Казань', callbackId + '_kazan')],
+          [Markup.button.callback('Москва', callbackId + '_moscow')],
+          [Markup.button.callback('🌍 Другой регион', callbackId + '_other')],
         ])
       );
 
@@ -1852,17 +1874,27 @@ const applicationHandlers = {
       await ctx.answerCbQuery('Произошла ошибка');
     }
   },
-
-  handleRegionSelection: async (ctx) => {
+  handleRegionSelectionCached: async (ctx) => {
     try {
-      const region = ctx.match[1];
-      const userId = ctx.from.id;
-      const sku = userStates.get(userId + '_application');
+      const fullCallbackData = ctx.match[0]; // Полные данные callback
+      const parts = fullCallbackData.split('_');
 
-      if (!sku) {
-        await ctx.answerCbQuery('Ошибка: данные заявки не найдены');
+      // Извлекаем callbackId и регион
+      const callbackId = parts.slice(0, -1).join('_');
+      const region = parts[parts.length - 1];
+
+      console.log('[DEBUG] Callback ID:', callbackId);
+      console.log('[DEBUG] Region:', region);
+
+      // Получаем данные из кэша
+      const cachedData = utils.getCallbackData(callbackId);
+      if (!cachedData) {
+        await ctx.answerCbQuery('❌ Данные устарели. Начните заново.');
         return;
       }
+
+      const { sku, productName, productPrice, productUrl } = cachedData;
+      const userId = ctx.from.id;
 
       const product = productService.findProductBySku(sku);
       if (!product) {
@@ -1894,9 +1926,9 @@ ${managerMentions}
 <b>📍 Регион:</b> ${utils.escapeHtml(utils.getRegionName(region))}
 
 <b>📦 Информация о товаре:</b>
-• Наименование: ${utils.escapeHtml(product.name)}
-• Цена: ${product.price.toLocaleString('ru-RU')} руб.
-• Ссылка на сайте: ${product.urlSite}
+• Наименование: ${utils.escapeHtml(productName)}
+• Цена: ${productPrice.toLocaleString('ru-RU')} руб.
+• Ссылка на сайте: ${productUrl}
 
 <b>👤 Информация о клиенте:</b>
 • Имя: ${utils.escapeHtml(firstName)}
@@ -1904,7 +1936,7 @@ ${managerMentions}
 
 <b>🔗 Ссылки для связи:</b>
 ${username !== 'не указан' ? `• Написать в Telegram: https://t.me/${user.username}` : '• Telegram: недоступен'}
-• Ссылка на товар: ${product.urlSite}
+• Ссылка на товар: ${productUrl}
 
 <b>⏰ Время заявки:</b> ${new Date().toLocaleString('ru-RU')}
 `.trim();
@@ -1918,7 +1950,7 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
             },
             {
               text: '🌐 Открыть товар на сайте',
-              url: product.urlSite
+              url: productUrl
             }
           ]
         ]
@@ -1928,7 +1960,7 @@ ${username !== 'не указан' ? `• Написать в Telegram: https://
         CONFIG.SALE_CHAT_ID,
         messageText,
         {
-          parse_mode: 'HTML', // ← Используйте HTML
+          parse_mode: 'HTML',
           reply_markup: replyMarkup
         }
       );
@@ -2172,7 +2204,44 @@ function setupBotHandlers() {
     productService.showProduct(ctx, currentIndex + 1);
     ctx.answerCbQuery();
   });
-  bot.action(/^application_(.+)$/, (ctx) => applicationHandlers.handleApplication(ctx));
+  bot.action(/^app_[a-z0-9_]+(?:_[a-z0-9_]+)?$/, async (ctx) => {
+    try {
+      const fullCb = ctx.match[0];
+
+      // 1) Если это выбор региона (в конце есть _petersburg/_moscow/...),
+      //    оставим вашу текущую логику:
+      if (/_petersburg$|_moscow$|_rostov$|_sochi$|_simferopl$|_ekaterinburg$|_kazan$|_other$/.test(fullCb)) {
+        return applicationHandlers.handleRegionSelectionCached(ctx);
+      }
+
+      // 2) Иначе это старт заявки из карточки товара — читаем из кэша:
+      const cached = utils.getCallbackData(fullCb);
+      if (!cached || !cached.sku) {
+        await ctx.answerCbQuery('❌ Данные устарели. Откройте товар заново.');
+        return;
+      }
+
+      // Покажем выбор регионов, приклеив к исходному callbackId суффиксы регионов.
+      await ctx.reply(
+        '📍 Выберите ваш регион:',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Санкт-Петербург', fullCb + '_petersburg')],
+          [Markup.button.callback('Ростов', fullCb + '_rostov')],
+          [Markup.button.callback('Сочи', fullCb + '_sochi')],
+          [Markup.button.callback('Симферополь', fullCb + '_simferopl')],
+          [Markup.button.callback('Екатеринбург', fullCb + '_ekaterinburg')],
+          [Markup.button.callback('Казань', fullCb + '_kazan')],
+          [Markup.button.callback('Москва', fullCb + '_moscow')],
+          [Markup.button.callback('🌍 Другой регион', fullCb + '_other')],
+        ])
+      );
+
+      await ctx.answerCbQuery();
+    } catch (error) {
+      console.error('Error in app handler:', error);
+      await ctx.answerCbQuery('❌ Ошибка обработки');
+    }
+  });
   bot.action(/^region_(.+)$/, (ctx) => applicationHandlers.handleRegionSelection(ctx));
   bot.action(/^publish_(\d+)$/, (ctx) => adminHandlers.handleInlinePublish(ctx));
   bot.action(/^delete_(\d+)$/, (ctx) => adminHandlers.handleInlineDelete(ctx));
@@ -2186,7 +2255,21 @@ function setupBotHandlers() {
   bot.action('close_catalog', (ctx) => catalogHandlers.handleCloseCatalog(ctx));
   bot.action('page_info', (ctx) => catalogHandlers.handlePageInfo(ctx));
   // Лизинг: запуск калькулятора из карточки
-  bot.action(/^leasing_(.+)$/, (ctx) => leasingHandlers.startLeasingCalculation(ctx));
+  bot.action(/^lease_[a-z0-9_]+$/, async (ctx) => {
+    try {
+      const callbackId = ctx.match[0];
+      const data = utils.getCallbackData(callbackId);
+      if (!data || !data.sku) {
+        return ctx.answerCbQuery('❌ Данные устарели. Откройте товар заново.');
+      }
+      // Подсовываем SKU в match[1], чтобы переиспользовать текущую логику
+      ctx.match = [ctx.match[0], data.sku];
+      return leasingHandlers.startLeasingCalculation(ctx);
+    } catch (e) {
+      console.error('Lease start by cache error:', e);
+      return ctx.answerCbQuery('❌ Ошибка запуска расчёта');
+    }
+  });
 
   // Лизинг: отправить заявку
   bot.action(/^lapp_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9_]+)?$/, async (ctx) => {
@@ -2209,9 +2292,35 @@ function setupBotHandlers() {
   });
 
   // Лизинг: вернуться в карточку товара (кнопка из результатов расчёта)
-  bot.action(/^back_to_product_(.+)$/, (ctx) => leasingHandlers.handleBackToProduct(ctx))
+  bot.action(/^btp_[a-z0-9_]+$/, async (ctx) => {
+    try {
+      const cbId = ctx.match[0];
+      const data = utils.getCallbackData(cbId);
+      if (!data || !data.sku) {
+        return ctx.answerCbQuery('❌ Данные устарели. Откройте товар заново.');
+      }
+
+      const sku = data.sku;
+      const product = productService.findProductBySku(sku);
+      if (!product) {
+        return ctx.answerCbQuery('❌ Товар не найден');
+      }
+
+      const category = product.category;
+      const productsInCategory = productService.getProductsByCategory(category);
+      const productIndex = productsInCategory.findIndex(p => p.sku === sku);
+
+      try { await ctx.deleteMessage(); } catch (_) { }
+
+      await productService.showProduct(ctx, category, Math.max(productIndex, 0));
+      await ctx.answerCbQuery();
+    } catch (e) {
+      console.error('btp handler error:', e);
+      await ctx.answerCbQuery('❌ Ошибка возврата к товару');
+    }
+  });
   // Обработчик для callback-ключей лизинга
- 
+
   // Fallback
   bot.on(['photo', 'video'], async (ctx) => {
     // Пропускаем channel_post и edited_channel_post
