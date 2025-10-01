@@ -23,6 +23,15 @@
       "lastName": "",
       "subscribedAt": "2025-09-15T07:19:30.724Z",
       "updatedAt": "2025-09-15T07:19:44.139Z"
+    },
+    {
+      "id": 1093970062,
+      "subscribe": false,
+      "username": "Vizysya",
+      "firstName": "Вика",
+      "lastName": "",
+      "subscribedAt": "2025-09-25T14:06:42.818Z",
+      "updatedAt": "2025-09-25T14:06:54.092Z"
     }
   ]
 }
